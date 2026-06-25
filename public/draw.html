@@ -21,12 +21,27 @@
   .banner.pending { border-color:#5b4b1f; }
   footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #2a2a2a; font-size: 12px; color: #777; line-height: 1.6; text-align:center; max-width:480px; }
   footer a { color: #999; }
+
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:100; }
+  .modal-box { background:#1c1c1c; border:1px solid #333; border-radius:14px; padding:28px 24px; max-width:340px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  .modal-icon { font-size:40px; margin-bottom:8px; }
+  .modal-title { font-size:17px; font-weight:bold; color:#fff; margin-bottom:8px; }
+  .modal-text { font-size:14px; color:#aaa; line-height:1.5; }
+  .modal-ok { margin-top:20px; width:100%; background:#5b5bd6; color:#fff; border:none; padding:10px; border-radius:8px; cursor:pointer; font-size:14px; }
 </style>
 </head>
 <body>
   <div class="banner" id="returnBanner" style="display:none"></div>
+  <div class="modal-overlay" id="modalOverlay" style="display:none">
+    <div class="modal-box">
+      <div class="modal-icon" id="modalIcon">🎨</div>
+      <div class="modal-title" id="modalTitle">Готово</div>
+      <div class="modal-text" id="modalText"></div>
+      <button class="modal-ok" id="modalOk">ОК</button>
+    </div>
+  </div>
   <h2 id="title">Нарисуй для стримера</h2>
-  <canvas id="canvas" width="500" height="350"></canvas>
+  <canvas id="canvas" width="480" height="270"></canvas>
   <div class="toolbar">
     <input type="color" id="color" value="#ff0000">
     <input type="range" id="size" min="1" max="30" value="4">
@@ -102,6 +117,16 @@ document.getElementById('clear').onclick = () => {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 };
 
+function showModal({ icon = '🎨', title = '', text = '' }) {
+  document.getElementById('modalIcon').textContent = icon;
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalText').textContent = text;
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+document.getElementById('modalOk').onclick = () => {
+  document.getElementById('modalOverlay').style.display = 'none';
+};
+
 const slug = new URLSearchParams(location.search).get('slug');
 
 const BASE_PRICE = 50;
@@ -158,7 +183,11 @@ document.getElementById('submit').onclick = async () => {
       return;
     }
     if (data.free) {
-      alert('Тестовый донат отправлен стримеру на модерацию!');
+      showModal({
+        icon: '✅',
+        title: 'Донат отправлен!',
+        text: 'Тестовый донат отправлен стримеру на модерацию.',
+      });
       submitBtn.disabled = false;
       submitBtn.textContent = 'Отправить донат';
       return;

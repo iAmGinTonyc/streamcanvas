@@ -15,14 +15,14 @@
   }
 
   .feed { display:flex; flex-direction:column; gap:12px; margin-top:16px; }
-  .feed-item { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:12px; display:flex; gap:12px; }
-  .feed-item img { width:80px; height:60px; object-fit:cover; border-radius:6px; background:#fff; flex-shrink:0; }
+  .feed-item { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:12px; display:flex; gap:12px; max-width:460px; }
+  .feed-item img { width:80px; height:45px; object-fit:cover; border-radius:6px; background:#fff; flex-shrink:0; }
   .feed-body { flex:1; min-width:0; }
   .feed-meta { font-size:13px; color:#aaa; margin-bottom:6px; }
   .feed-actions { display:flex; gap:8px; margin-top:8px; }
-  button { padding:8px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
-  .approve { background:#2e7d32; color:#fff; flex:1; }
-  .reject { background:#7d2e2e; color:#fff; flex:1; }
+  button { padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
+  .approve { background:#2e7d32; color:#fff; }
+  .reject { background:#7d2e2e; color:#fff; }
 
   .badge { padding:3px 8px; border-radius:5px; font-size:12px; }
   .badge-pending { background:#5b4b1f; color:#f0c674; }
