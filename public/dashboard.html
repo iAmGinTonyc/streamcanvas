@@ -6,31 +6,24 @@
 <style>
   body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:24px; }
   h1 { font-size: 20px; }
-  .layout { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
-  .col { flex:1; min-width:320px; }
-  .grid { display:flex; flex-wrap:wrap; gap:16px; margin-top:20px; }
-  .card { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:12px; width:240px; }
-  .card img { width:100%; border-radius:6px; background:#fff; display:block; }
-  .meta { font-size:13px; color:#aaa; margin:8px 0; }
-  .actions { display:flex; gap:8px; }
-  button { flex:1; padding:8px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
-  .approve { background:#2e7d32; color:#fff; }
-  .reject { background:#7d2e2e; color:#fff; }
+  .layout { display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap; }
+  .feed-col { flex:1; min-width:280px; }
+  .side-col { width:280px; flex-shrink:0; }
   .empty { color:#777; margin-top:20px; }
-  .balance-box { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:16px 20px; margin-bottom:24px; }
-  .balance-amount { font-size:28px; font-weight:bold; }
-  .payout-btn { margin-top:10px; background:#5b5bd6; color:#fff; border:none; padding:10px 16px; border-radius:6px; cursor:pointer; }
-  .payout-btn:disabled { background:#444; cursor:not-allowed; }
-  .payout-history { margin-top:12px; font-size:13px; color:#999; }
-  .payout-history div { padding:4px 0; border-top:1px solid #2a2a2a; }
-  .preview-box { background:#000; border:1px solid #333; border-radius:10px; overflow:hidden; aspect-ratio:16/9; position:relative; }
-  .preview-box iframe { width:100%; height:100%; border:none; }
-  .preview-label { font-size:13px; color:#999; margin:10px 0 6px; }
-  .donations { margin-top:16px; }
-  .donations table { width:100%; border-collapse:collapse; font-size:13px; }
-  .donations th, .donations td { text-align:left; padding:8px 6px; border-bottom:1px solid #2a2a2a; }
-  .donations th { color:#888; font-weight:normal; }
-  .donations img { width:40px; height:30px; object-fit:cover; border-radius:4px; background:#fff; }
+  @media (max-width: 640px) {
+    .side-col { width:100%; }
+  }
+
+  .feed { display:flex; flex-direction:column; gap:12px; margin-top:16px; }
+  .feed-item { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:12px; display:flex; gap:12px; }
+  .feed-item img { width:80px; height:60px; object-fit:cover; border-radius:6px; background:#fff; flex-shrink:0; }
+  .feed-body { flex:1; min-width:0; }
+  .feed-meta { font-size:13px; color:#aaa; margin-bottom:6px; }
+  .feed-actions { display:flex; gap:8px; margin-top:8px; }
+  button { padding:8px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
+  .approve { background:#2e7d32; color:#fff; flex:1; }
+  .reject { background:#7d2e2e; color:#fff; flex:1; }
+
   .badge { padding:3px 8px; border-radius:5px; font-size:12px; }
   .badge-pending { background:#5b4b1f; color:#f0c674; }
   .badge-approved { background:#1f4b2f; color:#7ad08a; }
@@ -38,36 +31,52 @@
   .badge-rejected { background:#4b1f1f; color:#f08a8a; }
   .badge-awaiting_payment { background:#333; color:#999; }
   .badge-payment_failed { background:#4b1f1f; color:#f08a8a; }
+
+  .preview-box { background:#000; border:1px solid #333; border-radius:10px; overflow:hidden; aspect-ratio:16/9; }
+  .preview-box iframe { width:100%; height:100%; border:none; }
+  .preview-label { font-size:12px; color:#999; margin:0 0 6px; }
+
+  .balance-box { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:16px; margin-top:16px; }
+  .balance-amount { font-size:26px; font-weight:bold; }
+  .payout-btn { width:100%; margin-top:10px; background:#5b5bd6; color:#fff; border:none; padding:10px; border-radius:6px; cursor:pointer; }
+  .payout-btn:disabled { background:#444; cursor:not-allowed; }
+  .meta { font-size:13px; color:#aaa; margin:8px 0; }
+  .payout-history { margin-top:12px; font-size:13px; color:#999; }
+  .payout-history div { padding:4px 0; border-top:1px solid #2a2a2a; }
+
+  .links-box { margin-top:14px; padding-top:14px; border-top:1px solid #2a2a2a; font-size:13px; }
+  .links-box a { color:#8ab4ff; word-break:break-all; display:block; margin-top:4px; }
+  .links-box .label { color:#999; margin-top:10px; }
+  .links-box .label:first-child { margin-top:0; }
 </style>
 </head>
 <body>
   <h1 id="title">Кабинет <button onclick="logout()" style="float:right;background:#333;color:#eee;padding:6px 12px;font-size:13px;">Выйти</button></h1>
 
   <div class="layout">
-    <div class="col">
-      <p class="preview-label">Что сейчас видно на стриме (живое окно OBS)</p>
-      <div class="preview-box"><iframe id="overlayFrame"></iframe></div>
-
-      <p class="meta">Рисунки на модерацию (обновляется каждые 5 сек)</p>
-      <div class="grid" id="grid"></div>
-      <p class="empty" id="empty" style="display:none">Пока нет рисунков на модерацию.</p>
-
-      <div class="donations">
-        <p class="meta">История донатов</p>
-        <table>
-          <thead><tr><th></th><th>Когда</th><th>Сумма</th><th>Показ</th><th>Статус</th></tr></thead>
-          <tbody id="donationRows"></tbody>
-        </table>
-      </div>
+    <div class="feed-col">
+      <p class="meta">История донатов (обновляется каждые 5 сек)</p>
+      <div class="feed" id="feed"></div>
+      <p class="empty" id="empty" style="display:none">Пока нет донатов.</p>
     </div>
 
-    <div class="col" style="max-width:340px">
+    <div class="side-col">
+      <p class="preview-label">Сейчас на стриме (OBS)</p>
+      <div class="preview-box"><iframe id="overlayFrame"></iframe></div>
+
       <div class="balance-box">
         <div>Доступно к выводу</div>
         <div class="balance-amount" id="balance">— ₽</div>
         <button class="payout-btn" id="payoutBtn" onclick="requestPayout()">Запросить выплату</button>
         <p class="meta">Выплата по СБП на указанный при регистрации номер, вручную, в течение 24 часов.</p>
         <div class="payout-history" id="payoutHistory"></div>
+
+        <div class="links-box">
+          <div class="label">Ссылка для зрителей:</div>
+          <a id="donateLink" href="#"></a>
+          <div class="label">Оверлей для OBS:</div>
+          <a id="overlayLink" href="#"></a>
+        </div>
       </div>
     </div>
   </div>
@@ -87,39 +96,16 @@ async function checkAuth() {
   const me = await res.json();
   document.getElementById('title').firstChild.textContent = `Кабинет — ${me.name} `;
   document.getElementById('overlayFrame').src = `/overlay.html?slug=${me.slug}`;
+
+  const donateUrl = `${location.origin}/draw.html?slug=${me.slug}`;
+  const overlayUrl = `${location.origin}/overlay.html?slug=${me.slug}`;
+  const donateLink = document.getElementById('donateLink');
+  const overlayLink = document.getElementById('overlayLink');
+  donateLink.href = donateUrl;
+  donateLink.textContent = donateUrl;
+  overlayLink.href = overlayUrl;
+  overlayLink.textContent = overlayUrl;
   return true;
-}
-
-async function load() {
-  const res = await fetch('/api/drawings?status=pending');
-  if (res.status === 401) return window.location.href = '/login.html';
-  if (!res.ok) return;
-  const drawings = await res.json();
-  const grid = document.getElementById('grid');
-  const empty = document.getElementById('empty');
-  grid.innerHTML = '';
-  empty.style.display = drawings.length ? 'none' : 'block';
-  for (const d of drawings) {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `
-      <img src="${d.image_data}">
-      <div class="meta">Сумма: ${d.amount} ₽ · показ: ${d.duration_sec} сек</div>
-      <div class="actions">
-        <button class="approve">Показать</button>
-        <button class="reject">Отклонить</button>
-      </div>
-    `;
-    card.querySelector('.approve').onclick = () => act(d.id, 'approve');
-    card.querySelector('.reject').onclick = () => act(d.id, 'reject');
-    grid.appendChild(card);
-  }
-}
-
-async function act(id, action) {
-  await fetch(`/api/drawings/${id}/${action}`, { method: 'POST' });
-  load();
-  loadDonations();
 }
 
 const STATUS_LABELS = {
@@ -131,23 +117,49 @@ const STATUS_LABELS = {
   rejected: 'отклонено',
 };
 
-async function loadDonations() {
+async function loadFeed() {
   const res = await fetch('/api/drawings?limit=50');
+  if (res.status === 401) return window.location.href = '/login.html';
   if (!res.ok) return;
   const rows = await res.json();
-  const tbody = document.getElementById('donationRows');
-  tbody.innerHTML = rows.map(d => {
-    const date = new Date(d.created_at).toLocaleString('ru-RU');
+  const feed = document.getElementById('feed');
+  const empty = document.getElementById('empty');
+  empty.style.display = rows.length ? 'none' : 'block';
+
+  feed.innerHTML = rows.map(d => {
+    const date = new Date(Number(d.created_at)).toLocaleString('ru-RU');
+    const needsModeration = d.status === 'pending';
     return `
-      <tr>
-        <td><img src="${d.image_data}"></td>
-        <td>${date}</td>
-        <td>${d.amount} ₽ <span style="color:#777">(тебе ${d.streamer_amount} ₽)</span></td>
-        <td>${d.duration_sec} сек</td>
-        <td><span class="badge badge-${d.status}">${STATUS_LABELS[d.status] || d.status}</span></td>
-      </tr>
+      <div class="feed-item" data-id="${d.id}">
+        <img src="${d.image_data}">
+        <div class="feed-body">
+          <div class="feed-meta">
+            ${date} · ${d.amount} ₽ <span style="color:#777">(тебе ${d.streamer_amount} ₽)</span> · показ ${d.duration_sec} сек
+          </div>
+          <span class="badge badge-${d.status}">${STATUS_LABELS[d.status] || d.status}</span>
+          ${needsModeration ? `
+            <div class="feed-actions">
+              <button class="approve">Показать</button>
+              <button class="reject">Отклонить</button>
+            </div>
+          ` : ''}
+        </div>
+      </div>
     `;
   }).join('');
+
+  feed.querySelectorAll('.feed-item').forEach(item => {
+    const id = item.dataset.id;
+    const approveBtn = item.querySelector('.approve');
+    const rejectBtn = item.querySelector('.reject');
+    if (approveBtn) approveBtn.onclick = () => act(id, 'approve');
+    if (rejectBtn) rejectBtn.onclick = () => act(id, 'reject');
+  });
+}
+
+async function act(id, action) {
+  await fetch(`/api/drawings/${id}/${action}`, { method: 'POST' });
+  loadFeed();
 }
 
 async function loadBalance() {
@@ -164,7 +176,7 @@ async function loadPayoutHistory() {
   const rows = await res.json();
   const el = document.getElementById('payoutHistory');
   el.innerHTML = rows.map(r => {
-    const date = new Date(r.requested_at).toLocaleString('ru-RU');
+    const date = new Date(Number(r.requested_at)).toLocaleString('ru-RU');
     const statusText = r.status === 'paid' ? '✅ выплачено' : '⏳ ожидает выплаты';
     return `<div>${date} — ${r.amount} ₽ — ${statusText}</div>`;
   }).join('');
@@ -181,12 +193,10 @@ async function requestPayout() {
 
 (async () => {
   if (!(await checkAuth())) return;
-  load();
-  loadDonations();
+  loadFeed();
   loadBalance();
   loadPayoutHistory();
-  setInterval(load, 5000);
-  setInterval(loadDonations, 5000);
+  setInterval(loadFeed, 5000);
   setInterval(loadBalance, 5000);
 })();
 </script>

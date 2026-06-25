@@ -64,12 +64,15 @@ const YOOKASSA_SECRET_KEY = process.env.YOOKASSA_SECRET_KEY;
 const PLATFORM_FEE_RATE = 0.10; // 10% комиссия платформы
 
 const BASE_PRICE = 50; // отправка рисунка
-const DURATION_PRICES = { 60: 100, 120: 180, 300: 350 }; // длительность показа -> цена
+const RATE_PER_SEC = 1; // цена за каждую секунду показа
+const MIN_DURATION_SEC = 10;
+const MAX_DURATION_SEC = 3600;
 
 function calcAmount(duration_sec) {
-  const durationPrice = DURATION_PRICES[duration_sec];
-  if (durationPrice === undefined) return null;
-  return BASE_PRICE + durationPrice;
+  if (!Number.isInteger(duration_sec) || duration_sec < MIN_DURATION_SEC || duration_sec > MAX_DURATION_SEC) {
+    return null;
+  }
+  return BASE_PRICE + duration_sec * RATE_PER_SEC;
 }
 
 async function createYookassaPayment({ amount, description, drawingId, slug }) {
@@ -206,12 +209,27 @@ app.get('/api/streamers/by-slug/:slug', asyncHandler(async (req, res) => {
 }));
 
 // --- viewer submits a drawing: creates it as awaiting_payment, returns a YooKassa payment URL ---
+// `free: true` skips payment entirely — temporary testing path, remove before real launch.
 app.post('/api/drawings', asyncHandler(async (req, res) => {
-  const { slug, image_data, duration_sec } = req.body;
+  const { slug, image_data, duration_sec, free } = req.body;
   const { rows } = await pool.query('SELECT * FROM streamers WHERE slug = $1', [slug]);
   const streamer = rows[0];
   if (!streamer) return res.status(404).json({ error: 'streamer not found' });
   if (!image_data) return res.status(400).json({ error: 'image_data required' });
+  if (!Number.isInteger(duration_sec) || duration_sec < MIN_DURATION_SEC || duration_sec > MAX_DURATION_SEC) {
+    return res.status(400).json({ error: 'недопустимая длительность показа' });
+  }
+
+  const id = genId();
+
+  if (free) {
+    await pool.query(
+      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, created_at)
+       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5)`,
+      [id, streamer.id, image_data, duration_sec, Date.now()]
+    );
+    return res.json({ id, status: 'pending', free: true });
+  }
 
   const amount = calcAmount(duration_sec);
   if (amount === null) return res.status(400).json({ error: 'недопустимая длительность показа' });
@@ -222,7 +240,6 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
 
   const platform_fee = Math.round(amount * PLATFORM_FEE_RATE);
   const streamer_amount = amount - platform_fee;
-  const id = genId();
 
   await pool.query(
     `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, created_at)

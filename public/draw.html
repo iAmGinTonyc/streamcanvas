@@ -9,9 +9,13 @@
   .toolbar { display:flex; gap:8px; align-items:center; margin:12px 0; flex-wrap:wrap; justify-content:center; }
   input[type=color] { width:36px; height:36px; border:none; padding:0; }
   input[type=range] { width:100px; }
-  select, button { padding:8px 12px; border-radius:6px; border:1px solid #444; background:#222; color:#eee; cursor:pointer; }
+  select, button, input[type=number] { padding:8px 12px; border-radius:6px; border:1px solid #444; background:#222; color:#eee; cursor:pointer; }
+  input[type=number] { width:90px; cursor:text; }
   .submit { background:#5b5bd6; color:#fff; border:none; font-weight:bold; }
   .price { margin-top:8px; color:#aaa; font-size:14px; }
+  .duration-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; margin:6px 0; }
+  .duration-row label { font-size:13px; color:#aaa; display:flex; align-items:center; gap:4px; cursor:pointer; }
+  .total { font-size:18px; font-weight:bold; color:#fff; margin-top:8px; }
   .banner { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:16px 20px; margin-bottom:16px; max-width:480px; text-align:center; }
   .banner.success { border-color:#2e7d32; }
   .banner.pending { border-color:#5b4b1f; }
@@ -25,14 +29,23 @@
     <input type="color" id="color" value="#ff0000">
     <input type="range" id="size" min="1" max="30" value="4">
     <button id="clear">Очистить</button>
-    <select id="duration">
-      <option value="60">1 минута — 100 ₽</option>
-      <option value="120">2 минуты — 180 ₽</option>
-      <option value="300">5 минут — 350 ₽</option>
-    </select>
-    <button class="submit" id="submit">Отправить донат</button>
   </div>
-  <p class="price">Базовая отправка рисунка: 50 ₽ + выбранная длительность показа.</p>
+
+  <div class="duration-row">
+    <button type="button" class="preset" data-sec="60">1 мин</button>
+    <button type="button" class="preset" data-sec="120">2 мин</button>
+    <button type="button" class="preset" data-sec="300">5 мин</button>
+    <input type="number" id="durationInput" min="10" max="3600" value="60" step="1"> сек
+  </div>
+
+  <div class="duration-row">
+    <label><input type="checkbox" id="freeMode"> Бесплатно (тест, временно)</label>
+  </div>
+
+  <p class="total" id="total">Итого: 110 ₽</p>
+
+  <button class="submit" id="submit">Отправить донат</button>
+  <p class="price">Базовая отправка рисунка: 50 ₽ + 1 ₽ за каждую секунду показа на стриме.</p>
 
 <script>
 const canvas = document.getElementById('canvas');
@@ -82,21 +95,61 @@ document.getElementById('clear').onclick = () => {
 
 const slug = new URLSearchParams(location.search).get('slug');
 
+const BASE_PRICE = 50;
+const RATE_PER_SEC = 1;
+const durationInput = document.getElementById('durationInput');
+const freeMode = document.getElementById('freeMode');
+const totalEl = document.getElementById('total');
+
+function updateTotal() {
+  const sec = parseInt(durationInput.value, 10) || 0;
+  if (freeMode.checked) {
+    totalEl.textContent = 'Итого: 0 ₽ (тестовый бесплатный донат)';
+  } else {
+    const total = BASE_PRICE + sec * RATE_PER_SEC;
+    totalEl.textContent = `Итого: ${total} ₽`;
+  }
+}
+
+document.querySelectorAll('.preset').forEach(btn => {
+  btn.onclick = () => {
+    durationInput.value = btn.dataset.sec;
+    updateTotal();
+  };
+});
+durationInput.addEventListener('input', updateTotal);
+freeMode.addEventListener('change', updateTotal);
+updateTotal();
+
 document.getElementById('submit').onclick = async () => {
   if (!slug) return alert('Не указан стример (нет slug в ссылке)');
-  const duration_sec = parseInt(document.getElementById('duration').value, 10);
+  const duration_sec = parseInt(durationInput.value, 10);
+  if (!duration_sec || duration_sec < 10 || duration_sec > 3600) {
+    return alert('Длительность должна быть от 10 до 3600 секунд');
+  }
   const submitBtn = document.getElementById('submit');
   submitBtn.disabled = true;
-  submitBtn.textContent = 'Подключаем оплату…';
+  submitBtn.textContent = freeMode.checked ? 'Отправляем…' : 'Подключаем оплату…';
   try {
     const res = await fetch('/api/drawings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slug, image_data: canvas.toDataURL('image/png'), duration_sec }),
+      body: JSON.stringify({
+        slug,
+        image_data: canvas.toDataURL('image/png'),
+        duration_sec,
+        free: freeMode.checked,
+      }),
     });
     const data = await res.json();
     if (data.error) {
       alert(data.error);
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Отправить донат';
+      return;
+    }
+    if (data.free) {
+      alert('Тестовый донат отправлен стримеру на модерацию!');
       submitBtn.disabled = false;
       submitBtn.textContent = 'Отправить донат';
       return;
