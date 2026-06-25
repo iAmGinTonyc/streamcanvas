@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Нарисуй стримеру — StreamCanvas</title>
+<title>Нарисуй стримеру — Pay2Draw</title>
 <style>
   body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:16px; display:flex; flex-direction:column; align-items:center; }
   canvas { background:#fff; border-radius:8px; touch-action:none; max-width:100%; }
@@ -11,6 +11,8 @@
   input[type=range] { width:100px; }
   select, button, input[type=number] { padding:8px 12px; border-radius:6px; border:1px solid #444; background:#222; color:#eee; cursor:pointer; }
   input[type=number] { width:90px; cursor:text; }
+  .tool-label { font-size:12px; color:#888; display:flex; flex-direction:column; align-items:center; gap:4px; }
+  #eraser.active { background:#5b5bd6; color:#fff; }
   .submit { background:#5b5bd6; color:#fff; border:none; font-weight:bold; }
   .price { margin-top:8px; color:#aaa; font-size:14px; }
   .duration-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; margin:6px 0; }
@@ -43,8 +45,10 @@
   <h2 id="title">Нарисуй для стримера</h2>
   <canvas id="canvas" width="480" height="270"></canvas>
   <div class="toolbar">
-    <input type="color" id="color" value="#ff0000">
+    <span class="tool-label">Кисть<input type="color" id="color" value="#ff0000"></span>
+    <span class="tool-label">Фон<input type="color" id="bgColor" value="#ffffff"></span>
     <input type="range" id="size" min="1" max="30" value="4">
+    <button type="button" id="eraser">Ластик</button>
     <button id="clear">Очистить</button>
   </div>
 
@@ -74,8 +78,15 @@
 <script>
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-ctx.fillStyle = '#fff';
-ctx.fillRect(0, 0, canvas.width, canvas.height);
+const bgColorInput = document.getElementById('bgColor');
+const eraserBtn = document.getElementById('eraser');
+let eraserMode = false;
+
+function fillBackground() {
+  ctx.fillStyle = bgColorInput.value;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+fillBackground();
 ctx.lineCap = 'round';
 
 let drawing = false, lastX = 0, lastY = 0;
@@ -94,7 +105,7 @@ function move(e) {
   if (!drawing) return;
   e.preventDefault();
   const p = pos(e);
-  ctx.strokeStyle = document.getElementById('color').value;
+  ctx.strokeStyle = eraserMode ? bgColorInput.value : document.getElementById('color').value;
   ctx.lineWidth = document.getElementById('size').value;
   ctx.beginPath();
   ctx.moveTo(lastX, lastY);
@@ -112,9 +123,13 @@ canvas.addEventListener('touchstart', start);
 canvas.addEventListener('touchmove', move);
 canvas.addEventListener('touchend', end);
 
-document.getElementById('clear').onclick = () => {
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+document.getElementById('clear').onclick = fillBackground;
+bgColorInput.addEventListener('input', fillBackground);
+
+eraserBtn.onclick = () => {
+  eraserMode = !eraserMode;
+  eraserBtn.classList.toggle('active', eraserMode);
+  eraserBtn.textContent = eraserMode ? 'Ластик ✓' : 'Ластик';
 };
 
 function showModal({ icon = '🎨', title = '', text = '' }) {
@@ -136,6 +151,7 @@ const freeMode = document.getElementById('freeMode');
 const totalEl = document.getElementById('total');
 
 function updateTotal() {
+  if (parseInt(durationInput.value, 10) > 3600) durationInput.value = 3600;
   const sec = parseInt(durationInput.value, 10) || 0;
   if (freeMode.checked) {
     totalEl.textContent = 'Итого: 0 ₽ (тестовый бесплатный донат)';

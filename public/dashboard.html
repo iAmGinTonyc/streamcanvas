@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Кабинет стримера — StreamCanvas</title>
+<title>Кабинет стримера — Pay2Draw</title>
 <style>
   body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:24px; }
   h1 { font-size: 20px; }
@@ -45,9 +45,12 @@
   .payout-history div { padding:4px 0; border-top:1px solid #2a2a2a; }
 
   .links-box { margin-top:14px; padding-top:14px; border-top:1px solid #2a2a2a; font-size:13px; }
-  .links-box a { color:#8ab4ff; word-break:break-all; display:block; margin-top:4px; }
   .links-box .label { color:#999; margin-top:10px; }
   .links-box .label:first-child { margin-top:0; }
+  .copy-row { display:flex; gap:6px; margin-top:4px; }
+  .copy-row input { flex:1; min-width:0; background:#111; border:1px solid #333; color:#666; border-radius:6px; padding:6px 8px; font-size:12px; }
+  .copy-btn { padding:6px 10px; background:#333; color:#eee; border:none; border-radius:6px; cursor:pointer; font-size:12px; white-space:nowrap; }
+  .copy-btn.copied { background:#2e7d32; }
 </style>
 </head>
 <body>
@@ -73,9 +76,15 @@
 
         <div class="links-box">
           <div class="label">Ссылка для зрителей:</div>
-          <a id="donateLink" href="#"></a>
+          <div class="copy-row">
+            <input id="donateLink" type="password" readonly value="">
+            <button class="copy-btn" data-target="donateLink">Копировать</button>
+          </div>
           <div class="label">Оверлей для OBS:</div>
-          <a id="overlayLink" href="#"></a>
+          <div class="copy-row">
+            <input id="overlayLink" type="password" readonly value="">
+            <button class="copy-btn" data-target="overlayLink">Копировать</button>
+          </div>
         </div>
       </div>
     </div>
@@ -99,14 +108,24 @@ async function checkAuth() {
 
   const donateUrl = `${location.origin}/draw.html?slug=${me.slug}`;
   const overlayUrl = `${location.origin}/overlay.html?slug=${me.slug}`;
-  const donateLink = document.getElementById('donateLink');
-  const overlayLink = document.getElementById('overlayLink');
-  donateLink.href = donateUrl;
-  donateLink.textContent = donateUrl;
-  overlayLink.href = overlayUrl;
-  overlayLink.textContent = overlayUrl;
+  document.getElementById('donateLink').value = donateUrl;
+  document.getElementById('overlayLink').value = overlayUrl;
   return true;
 }
+
+document.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const input = document.getElementById(btn.dataset.target);
+    await navigator.clipboard.writeText(input.value);
+    const original = btn.textContent;
+    btn.textContent = 'Скопировано';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('copied');
+    }, 1500);
+  });
+});
 
 const STATUS_LABELS = {
   awaiting_payment: 'ожидает оплаты',

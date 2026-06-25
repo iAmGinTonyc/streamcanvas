@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>StreamCanvas — регистрация стримера</title>
+<title>Pay2Draw — регистрация стримера</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 480px; margin: 60px auto; padding: 0 16px; background:#111; color:#eee; }
   input { width: 100%; padding: 10px; margin: 6px 0 16px; box-sizing: border-box; background:#222; color:#eee; border:1px solid #444; border-radius:6px; }
@@ -16,9 +16,9 @@
 </style>
 </head>
 <body>
-  <h1>Стать стримером</h1>
-  <p>Без оплаты пока — создаём твой личный кабинет с логином и паролем.</p>
-  <p style="color:#999; font-size:13px;">StreamCanvas — сервис для перевода донатов стримерам с возможностью сопроводить донат рисунком, который стример показывает в эфире. <a href="/oferta.html">Тарифы и условия оказания услуг</a>.</p>
+  <h1>Pay2Draw</h1>
+  <p>— сервис для перевода донатов стримерам с возможностью сопроводить донат рисунком, который стример показывает в эфире.</p>
+  <p style="color:#999; font-size:13px;"><a href="/oferta.html">Тарифы и условия оказания услуг</a>.</p>
   <label>Имя / название канала</label>
   <input id="name" placeholder="Например: ShadowPlay">
   <label>Slug (для ссылки зрителям, латиница без пробелов)</label>
@@ -39,6 +39,33 @@
   </footer>
 
 <script>
+const TRANSLIT = {
+  а:'a', б:'b', в:'v', г:'g', д:'d', е:'e', ё:'e', ж:'zh', з:'z', и:'i', й:'y',
+  к:'k', л:'l', м:'m', н:'n', о:'o', п:'p', р:'r', с:'s', т:'t', у:'u', ф:'f',
+  х:'h', ц:'ts', ч:'ch', ш:'sh', щ:'sch', ъ:'', ы:'y', ь:'', э:'e', ю:'yu', я:'ya',
+};
+
+function slugify(str) {
+  return str
+    .toLowerCase()
+    .split('')
+    .map(ch => TRANSLIT[ch] !== undefined ? TRANSLIT[ch] : ch)
+    .join('')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+let slugManuallyEdited = false;
+const nameInput = document.getElementById('name');
+const slugInput = document.getElementById('slug');
+
+nameInput.addEventListener('input', () => {
+  if (!slugManuallyEdited) slugInput.value = slugify(nameInput.value);
+});
+slugInput.addEventListener('input', () => {
+  slugManuallyEdited = true;
+});
+
 async function signup() {
   const name = document.getElementById('name').value.trim();
   const slug = document.getElementById('slug').value.trim();
