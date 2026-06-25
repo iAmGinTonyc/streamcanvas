@@ -28,10 +28,17 @@ async function initSchema() {
       image_data TEXT NOT NULL,
       duration_sec INTEGER NOT NULL DEFAULT 60,
       amount INTEGER NOT NULL DEFAULT 0,
+      platform_fee INTEGER NOT NULL DEFAULT 0,
+      streamer_amount INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending',
+      payment_id TEXT,
       created_at BIGINT NOT NULL,
       shown_until BIGINT
     );
+    ALTER TABLE drawings ADD COLUMN IF NOT EXISTS platform_fee INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE drawings ADD COLUMN IF NOT EXISTS streamer_amount INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE drawings ADD COLUMN IF NOT EXISTS payment_id TEXT;
+    UPDATE drawings SET streamer_amount = amount WHERE streamer_amount = 0 AND amount > 0;
     CREATE TABLE IF NOT EXISTS payout_requests (
       id TEXT PRIMARY KEY,
       streamer_id TEXT NOT NULL,
@@ -51,6 +58,56 @@ const schemaReady = initSchema();
 
 const ADMIN_KEY = process.env.ADMIN_KEY || 'admin123';
 const SESSION_COOKIE = 'sc_session';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+const YOOKASSA_SHOP_ID = process.env.YOOKASSA_SHOP_ID;
+const YOOKASSA_SECRET_KEY = process.env.YOOKASSA_SECRET_KEY;
+const PLATFORM_FEE_RATE = 0.10; // 10% комиссия платформы
+
+const BASE_PRICE = 50; // отправка рисунка
+const DURATION_PRICES = { 60: 100, 120: 180, 300: 350 }; // длительность показа -> цена
+
+function calcAmount(duration_sec) {
+  const durationPrice = DURATION_PRICES[duration_sec];
+  if (durationPrice === undefined) return null;
+  return BASE_PRICE + durationPrice;
+}
+
+async function createYookassaPayment({ amount, description, drawingId, slug }) {
+  const idempotenceKey = crypto.randomUUID();
+  const res = await fetch('https://api.yookassa.ru/v3/payments', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotence-Key': idempotenceKey,
+      Authorization: 'Basic ' + Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET_KEY}`).toString('base64'),
+    },
+    body: JSON.stringify({
+      amount: { value: amount.toFixed(2), currency: 'RUB' },
+      capture: true,
+      confirmation: {
+        type: 'redirect',
+        return_url: `${BASE_URL}/draw.html?slug=${slug}&payment=done`,
+      },
+      description,
+      metadata: { drawing_id: drawingId },
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`YooKassa Init failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+async function fetchYookassaPayment(paymentId) {
+  const res = await fetch(`https://api.yookassa.ru/v3/payments/${paymentId}`, {
+    headers: {
+      Authorization: 'Basic ' + Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET_KEY}`).toString('base64'),
+    },
+  });
+  if (!res.ok) throw new Error(`YooKassa fetch payment failed: ${res.status}`);
+  return res.json();
+}
 
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
@@ -148,20 +205,80 @@ app.get('/api/streamers/by-slug/:slug', asyncHandler(async (req, res) => {
   res.json(rows[0]);
 }));
 
-// --- viewer submits a drawing (payment not wired yet, amount is just stored) ---
+// --- viewer submits a drawing: creates it as awaiting_payment, returns a YooKassa payment URL ---
 app.post('/api/drawings', asyncHandler(async (req, res) => {
-  const { slug, image_data, duration_sec, amount } = req.body;
+  const { slug, image_data, duration_sec } = req.body;
   const { rows } = await pool.query('SELECT * FROM streamers WHERE slug = $1', [slug]);
   const streamer = rows[0];
   if (!streamer) return res.status(404).json({ error: 'streamer not found' });
   if (!image_data) return res.status(400).json({ error: 'image_data required' });
+
+  const amount = calcAmount(duration_sec);
+  if (amount === null) return res.status(400).json({ error: 'недопустимая длительность показа' });
+
+  if (!YOOKASSA_SHOP_ID || !YOOKASSA_SECRET_KEY) {
+    return res.status(503).json({ error: 'Оплата временно не подключена' });
+  }
+
+  const platform_fee = Math.round(amount * PLATFORM_FEE_RATE);
+  const streamer_amount = amount - platform_fee;
   const id = genId();
+
   await pool.query(
-    `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, status, created_at)
-     VALUES ($1, $2, $3, $4, $5, 'pending', $6)`,
-    [id, streamer.id, image_data, duration_sec || 60, amount || 0, Date.now()]
+    `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'awaiting_payment', $8)`,
+    [id, streamer.id, image_data, duration_sec, amount, platform_fee, streamer_amount, Date.now()]
   );
-  res.json({ id, status: 'pending' });
+
+  let payment;
+  try {
+    payment = await createYookassaPayment({
+      amount,
+      description: `Донат для ${streamer.name} — рисунок на стриме`,
+      drawingId: id,
+      slug,
+    });
+  } catch (e) {
+    await pool.query("UPDATE drawings SET status = 'payment_failed' WHERE id = $1", [id]);
+    return res.status(502).json({ error: 'Не удалось создать платёж' });
+  }
+
+  await pool.query('UPDATE drawings SET payment_id = $1 WHERE id = $2', [payment.id, id]);
+  res.json({ id, status: 'awaiting_payment', paymentUrl: payment.confirmation.confirmation_url });
+}));
+
+// --- YooKassa webhook: re-fetch payment by id from YooKassa itself to confirm authenticity ---
+app.post('/api/payments/yookassa/webhook', asyncHandler(async (req, res) => {
+  const paymentId = req.body && req.body.object && req.body.object.id;
+  if (!paymentId) return res.status(400).end();
+
+  let payment;
+  try {
+    payment = await fetchYookassaPayment(paymentId);
+  } catch (e) {
+    return res.status(502).end();
+  }
+
+  if (payment.status === 'succeeded') {
+    await pool.query(
+      "UPDATE drawings SET status = 'pending' WHERE payment_id = $1 AND status = 'awaiting_payment'",
+      [paymentId]
+    );
+  } else if (payment.status === 'canceled') {
+    await pool.query(
+      "UPDATE drawings SET status = 'payment_failed' WHERE payment_id = $1 AND status = 'awaiting_payment'",
+      [paymentId]
+    );
+  }
+
+  res.status(200).end();
+}));
+
+// --- viewer polls this after returning from YooKassa to know if the drawing was accepted ---
+app.get('/api/drawings/:id/status', asyncHandler(async (req, res) => {
+  const { rows } = await pool.query('SELECT status FROM drawings WHERE id = $1', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  res.json({ status: rows[0].status });
 }));
 
 // --- dashboard: list drawings, optionally filtered by status ---
@@ -224,10 +341,11 @@ app.get('/api/overlay/:slug/current', asyncHandler(async (req, res) => {
   });
 }));
 
-// --- balance: earned (all non-rejected drawings) minus already requested/paid ---
+// --- balance: streamer's cut of paid drawings (excludes platform fee, rejected, unpaid) ---
 async function getBalance(streamerId) {
   const { rows: earnedRows } = await pool.query(
-    "SELECT COALESCE(SUM(amount), 0) AS total FROM drawings WHERE streamer_id = $1 AND status != 'rejected'",
+    `SELECT COALESCE(SUM(streamer_amount), 0) AS total FROM drawings
+     WHERE streamer_id = $1 AND status NOT IN ('rejected', 'awaiting_payment', 'payment_failed')`,
     [streamerId]
   );
   const { rows: requestedRows } = await pool.query(

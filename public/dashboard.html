@@ -36,6 +36,8 @@
   .badge-approved { background:#1f4b2f; color:#7ad08a; }
   .badge-showing { background:#1f3b5b; color:#7ab0f0; }
   .badge-rejected { background:#4b1f1f; color:#f08a8a; }
+  .badge-awaiting_payment { background:#333; color:#999; }
+  .badge-payment_failed { background:#4b1f1f; color:#f08a8a; }
 </style>
 </head>
 <body>
@@ -121,6 +123,8 @@ async function act(id, action) {
 }
 
 const STATUS_LABELS = {
+  awaiting_payment: 'ожидает оплаты',
+  payment_failed: 'оплата не прошла',
   pending: 'на модерации',
   approved: 'в очереди показа',
   showing: 'показано',
@@ -138,7 +142,7 @@ async function loadDonations() {
       <tr>
         <td><img src="${d.image_data}"></td>
         <td>${date}</td>
-        <td>${d.amount} ₽</td>
+        <td>${d.amount} ₽ <span style="color:#777">(тебе ${d.streamer_amount} ₽)</span></td>
         <td>${d.duration_sec} сек</td>
         <td><span class="badge badge-${d.status}">${STATUS_LABELS[d.status] || d.status}</span></td>
       </tr>

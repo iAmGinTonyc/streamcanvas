@@ -12,9 +12,13 @@
   select, button { padding:8px 12px; border-radius:6px; border:1px solid #444; background:#222; color:#eee; cursor:pointer; }
   .submit { background:#5b5bd6; color:#fff; border:none; font-weight:bold; }
   .price { margin-top:8px; color:#aaa; font-size:14px; }
+  .banner { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:16px 20px; margin-bottom:16px; max-width:480px; text-align:center; }
+  .banner.success { border-color:#2e7d32; }
+  .banner.pending { border-color:#5b4b1f; }
 </style>
 </head>
 <body>
+  <div class="banner" id="returnBanner" style="display:none"></div>
   <h2 id="title">Нарисуй для стримера</h2>
   <canvas id="canvas" width="500" height="350"></canvas>
   <div class="toolbar">
@@ -78,27 +82,44 @@ document.getElementById('clear').onclick = () => {
 
 const slug = new URLSearchParams(location.search).get('slug');
 
-const PRICES = { 60: 100, 120: 180, 300: 350 };
-
 document.getElementById('submit').onclick = async () => {
   if (!slug) return alert('Не указан стример (нет slug в ссылке)');
   const duration_sec = parseInt(document.getElementById('duration').value, 10);
-  const amount = 50 + PRICES[duration_sec];
-  // Оплата пока не подключена — донат отправляется сразу на модерацию.
-  const res = await fetch('/api/drawings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug, image_data: canvas.toDataURL('image/png'), duration_sec, amount }),
-  });
-  const data = await res.json();
-  if (data.error) return alert(data.error);
-  alert('Рисунок отправлен стримеру на модерацию!');
+  const submitBtn = document.getElementById('submit');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Подключаем оплату…';
+  try {
+    const res = await fetch('/api/drawings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, image_data: canvas.toDataURL('image/png'), duration_sec }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert(data.error);
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Отправить донат';
+      return;
+    }
+    window.location.href = data.paymentUrl;
+  } catch (e) {
+    alert('Не удалось создать платёж, попробуй ещё раз');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Отправить донат';
+  }
 };
 
 if (slug) {
   fetch(`/api/streamers/by-slug/${slug}`).then(r => r.json()).then(s => {
     if (s.name) document.getElementById('title').textContent = `Нарисуй для ${s.name}`;
   });
+}
+
+if (new URLSearchParams(location.search).get('payment') === 'done') {
+  const banner = document.getElementById('returnBanner');
+  banner.style.display = 'block';
+  banner.className = 'banner pending';
+  banner.textContent = 'Если оплата прошла успешно, рисунок появится у стримера на модерации в течение минуты.';
 }
 </script>
 </body>
