@@ -11,11 +11,14 @@
   a { color: #8ab4ff; }
   label { font-size: 14px; color:#aaa; }
   .alt { margin-top: 16px; font-size: 14px; color:#999; }
+  footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #2a2a2a; font-size: 12px; color: #777; line-height: 1.6; }
+  footer a { color: #999; }
 </style>
 </head>
 <body>
   <h1>Стать стримером</h1>
   <p>Без оплаты пока — создаём твой личный кабинет с логином и паролем.</p>
+  <p style="color:#999; font-size:13px;">StreamCanvas — сервис для перевода донатов стримерам с возможностью сопроводить донат рисунком, который стример показывает в эфире. <a href="/oferta.html">Тарифы и условия оказания услуг</a>.</p>
   <label>Имя / название канала</label>
   <input id="name" placeholder="Например: ShadowPlay">
   <label>Slug (для ссылки зрителям, латиница без пробелов)</label>
@@ -28,6 +31,12 @@
   <input id="payout_phone" placeholder="+7 900 000-00-00">
   <button id="submitBtn" onclick="signup()">Создать кабинет</button>
   <p class="alt">Уже есть кабинет? <a href="/login.html">Войти</a></p>
+
+  <footer>
+    Исполнитель: Агафонов Антон Андреевич, самозанятый (НПД), ИНН 470518210355.<br>
+    Контакты: <a href="mailto:mountaincoolbe@gmail.com">mountaincoolbe@gmail.com</a>.<br>
+    <a href="/oferta.html">Публичная оферта, тарифы и условия оказания услуг</a>.
+  </footer>
 
 <script>
 async function signup() {
