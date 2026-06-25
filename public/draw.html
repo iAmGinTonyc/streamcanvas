@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Нарисуй стримеру — StreamCanvas</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:16px; display:flex; flex-direction:column; align-items:center; }
+  canvas { background:#fff; border-radius:8px; touch-action:none; max-width:100%; }
+  .toolbar { display:flex; gap:8px; align-items:center; margin:12px 0; flex-wrap:wrap; justify-content:center; }
+  input[type=color] { width:36px; height:36px; border:none; padding:0; }
+  input[type=range] { width:100px; }
+  select, button { padding:8px 12px; border-radius:6px; border:1px solid #444; background:#222; color:#eee; cursor:pointer; }
+  .submit { background:#5b5bd6; color:#fff; border:none; font-weight:bold; }
+  .price { margin-top:8px; color:#aaa; font-size:14px; }
+</style>
+</head>
+<body>
+  <h2 id="title">Нарисуй для стримера</h2>
+  <canvas id="canvas" width="500" height="350"></canvas>
+  <div class="toolbar">
+    <input type="color" id="color" value="#ff0000">
+    <input type="range" id="size" min="1" max="30" value="4">
+    <button id="clear">Очистить</button>
+    <select id="duration">
+      <option value="60">1 минута — 100 ₽</option>
+      <option value="120">2 минуты — 180 ₽</option>
+      <option value="300">5 минут — 350 ₽</option>
+    </select>
+    <button class="submit" id="submit">Отправить донат</button>
+  </div>
+  <p class="price">Базовая отправка рисунка: 50 ₽ + выбранная длительность показа.</p>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = '#fff';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.lineCap = 'round';
+
+let drawing = false, lastX = 0, lastY = 0;
+
+function pos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return {
+    x: (t.clientX - rect.left) * (canvas.width / rect.width),
+    y: (t.clientY - rect.top) * (canvas.height / rect.height),
+  };
+}
+
+function start(e) { drawing = true; const p = pos(e); lastX = p.x; lastY = p.y; }
+function move(e) {
+  if (!drawing) return;
+  e.preventDefault();
+  const p = pos(e);
+  ctx.strokeStyle = document.getElementById('color').value;
+  ctx.lineWidth = document.getElementById('size').value;
+  ctx.beginPath();
+  ctx.moveTo(lastX, lastY);
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  lastX = p.x; lastY = p.y;
+}
+function end() { drawing = false; }
+
+canvas.addEventListener('mousedown', start);
+canvas.addEventListener('mousemove', move);
+canvas.addEventListener('mouseup', end);
+canvas.addEventListener('mouseleave', end);
+canvas.addEventListener('touchstart', start);
+canvas.addEventListener('touchmove', move);
+canvas.addEventListener('touchend', end);
+
+document.getElementById('clear').onclick = () => {
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+};
+
+const slug = new URLSearchParams(location.search).get('slug');
+
+const PRICES = { 60: 100, 120: 180, 300: 350 };
+
+document.getElementById('submit').onclick = async () => {
+  if (!slug) return alert('Не указан стример (нет slug в ссылке)');
+  const duration_sec = parseInt(document.getElementById('duration').value, 10);
+  const amount = 50 + PRICES[duration_sec];
+  // Оплата пока не подключена — донат отправляется сразу на модерацию.
+  const res = await fetch('/api/drawings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, image_data: canvas.toDataURL('image/png'), duration_sec, amount }),
+  });
+  const data = await res.json();
+  if (data.error) return alert(data.error);
+  alert('Рисунок отправлен стримеру на модерацию!');
+};
+
+if (slug) {
+  fetch(`/api/streamers/by-slug/${slug}`).then(r => r.json()).then(s => {
+    if (s.name) document.getElementById('title').textContent = `Нарисуй для ${s.name}`;
+  });
+}
+</script>
+</body>
+</html>

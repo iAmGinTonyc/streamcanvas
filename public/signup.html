@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>StreamCanvas — регистрация стримера</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 60px auto; padding: 0 16px; background:#111; color:#eee; }
+  input { width: 100%; padding: 10px; margin: 6px 0 16px; box-sizing: border-box; background:#222; color:#eee; border:1px solid #444; border-radius:6px; }
+  button { padding: 10px 20px; cursor: pointer; background:#5b5bd6; color:#fff; border:none; border-radius:6px; font-size:15px; }
+  .result { margin-top: 24px; padding: 16px; background: #1c1c1c; border-radius: 8px; word-break: break-all; }
+  a { color: #8ab4ff; }
+  label { font-size: 14px; color:#aaa; }
+  .alt { margin-top: 16px; font-size: 14px; color:#999; }
+</style>
+</head>
+<body>
+  <h1>Стать стримером</h1>
+  <p>Без оплаты пока — создаём твой личный кабинет с логином и паролем.</p>
+  <label>Имя / название канала</label>
+  <input id="name" placeholder="Например: ShadowPlay">
+  <label>Slug (для ссылки зрителям, латиница без пробелов)</label>
+  <input id="slug" placeholder="shadowplay">
+  <label>Email</label>
+  <input id="email" type="email" placeholder="you@example.com">
+  <label>Пароль (минимум 6 символов)</label>
+  <input id="password" type="password" placeholder="••••••••">
+  <label>Номер телефона для выплат по СБП</label>
+  <input id="payout_phone" placeholder="+7 900 000-00-00">
+  <button onclick="signup()">Создать кабинет</button>
+  <p class="alt">Уже есть кабинет? <a href="/login.html">Войти</a></p>
+  <div class="result" id="result" style="display:none"></div>
+
+<script>
+async function signup() {
+  const name = document.getElementById('name').value.trim();
+  const slug = document.getElementById('slug').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const payout_phone = document.getElementById('payout_phone').value.trim();
+  if (!name || !slug || !email || !password || !payout_phone) return alert('Заполни все поля');
+  const res = await fetch('/api/streamers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, slug, email, password, payout_phone }),
+  });
+  const data = await res.json();
+  if (data.error) return alert(data.error);
+  const r = document.getElementById('result');
+  r.style.display = 'block';
+  r.innerHTML = `
+    <p><b>Готово! Ты уже вошёл в кабинет.</b></p>
+    <p>Кабинет: <a href="${data.dashboardUrl}">${location.origin}${data.dashboardUrl}</a></p>
+    <p>Ссылка для зрителей: <a href="${data.donateUrl}">${location.origin}${data.donateUrl}</a></p>
+    <p>Оверлей для OBS: <a href="/overlay.html?slug=${data.slug}">${location.origin}/overlay.html?slug=${data.slug}</a></p>
+  `;
+}
+</script>
+</body>
+</html>

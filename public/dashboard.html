@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Кабинет стримера — StreamCanvas</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:24px; }
+  h1 { font-size: 20px; }
+  .layout { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+  .col { flex:1; min-width:320px; }
+  .grid { display:flex; flex-wrap:wrap; gap:16px; margin-top:20px; }
+  .card { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:12px; width:240px; }
+  .card img { width:100%; border-radius:6px; background:#fff; display:block; }
+  .meta { font-size:13px; color:#aaa; margin:8px 0; }
+  .actions { display:flex; gap:8px; }
+  button { flex:1; padding:8px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
+  .approve { background:#2e7d32; color:#fff; }
+  .reject { background:#7d2e2e; color:#fff; }
+  .empty { color:#777; margin-top:20px; }
+  .balance-box { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:16px 20px; margin-bottom:24px; }
+  .balance-amount { font-size:28px; font-weight:bold; }
+  .payout-btn { margin-top:10px; background:#5b5bd6; color:#fff; border:none; padding:10px 16px; border-radius:6px; cursor:pointer; }
+  .payout-btn:disabled { background:#444; cursor:not-allowed; }
+  .payout-history { margin-top:12px; font-size:13px; color:#999; }
+  .payout-history div { padding:4px 0; border-top:1px solid #2a2a2a; }
+  .preview-box { background:#000; border:1px solid #333; border-radius:10px; overflow:hidden; aspect-ratio:16/9; position:relative; }
+  .preview-box iframe { width:100%; height:100%; border:none; }
+  .preview-label { font-size:13px; color:#999; margin:10px 0 6px; }
+  .donations { margin-top:16px; }
+  .donations table { width:100%; border-collapse:collapse; font-size:13px; }
+  .donations th, .donations td { text-align:left; padding:8px 6px; border-bottom:1px solid #2a2a2a; }
+  .donations th { color:#888; font-weight:normal; }
+  .donations img { width:40px; height:30px; object-fit:cover; border-radius:4px; background:#fff; }
+  .badge { padding:3px 8px; border-radius:5px; font-size:12px; }
+  .badge-pending { background:#5b4b1f; color:#f0c674; }
+  .badge-approved { background:#1f4b2f; color:#7ad08a; }
+  .badge-showing { background:#1f3b5b; color:#7ab0f0; }
+  .badge-rejected { background:#4b1f1f; color:#f08a8a; }
+</style>
+</head>
+<body>
+  <h1 id="title">Кабинет <button onclick="logout()" style="float:right;background:#333;color:#eee;padding:6px 12px;font-size:13px;">Выйти</button></h1>
+
+  <div class="layout">
+    <div class="col">
+      <p class="preview-label">Что сейчас видно на стриме (живое окно OBS)</p>
+      <div class="preview-box"><iframe id="overlayFrame"></iframe></div>
+
+      <p class="meta">Рисунки на модерацию (обновляется каждые 5 сек)</p>
+      <div class="grid" id="grid"></div>
+      <p class="empty" id="empty" style="display:none">Пока нет рисунков на модерацию.</p>
+
+      <div class="donations">
+        <p class="meta">История донатов</p>
+        <table>
+          <thead><tr><th></th><th>Когда</th><th>Сумма</th><th>Показ</th><th>Статус</th></tr></thead>
+          <tbody id="donationRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="col" style="max-width:340px">
+      <div class="balance-box">
+        <div>Доступно к выводу</div>
+        <div class="balance-amount" id="balance">— ₽</div>
+        <button class="payout-btn" id="payoutBtn" onclick="requestPayout()">Запросить выплату</button>
+        <p class="meta">Выплата по СБП на указанный при регистрации номер, вручную, в течение 24 часов.</p>
+        <div class="payout-history" id="payoutHistory"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+async function logout() {
+  await fetch('/api/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+}
+
+async function checkAuth() {
+  const res = await fetch('/api/me');
+  if (!res.ok) {
+    window.location.href = '/login.html';
+    return false;
+  }
+  const me = await res.json();
+  document.getElementById('title').firstChild.textContent = `Кабинет — ${me.name} `;
+  document.getElementById('overlayFrame').src = `/overlay.html?slug=${me.slug}`;
+  return true;
+}
+
+async function load() {
+  const res = await fetch('/api/drawings?status=pending');
+  if (res.status === 401) return window.location.href = '/login.html';
+  if (!res.ok) return;
+  const drawings = await res.json();
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('empty');
+  grid.innerHTML = '';
+  empty.style.display = drawings.length ? 'none' : 'block';
+  for (const d of drawings) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <img src="${d.image_data}">
+      <div class="meta">Сумма: ${d.amount} ₽ · показ: ${d.duration_sec} сек</div>
+      <div class="actions">
+        <button class="approve">Показать</button>
+        <button class="reject">Отклонить</button>
+      </div>
+    `;
+    card.querySelector('.approve').onclick = () => act(d.id, 'approve');
+    card.querySelector('.reject').onclick = () => act(d.id, 'reject');
+    grid.appendChild(card);
+  }
+}
+
+async function act(id, action) {
+  await fetch(`/api/drawings/${id}/${action}`, { method: 'POST' });
+  load();
+  loadDonations();
+}
+
+const STATUS_LABELS = {
+  pending: 'на модерации',
+  approved: 'в очереди показа',
+  showing: 'показано',
+  rejected: 'отклонено',
+};
+
+async function loadDonations() {
+  const res = await fetch('/api/drawings?limit=50');
+  if (!res.ok) return;
+  const rows = await res.json();
+  const tbody = document.getElementById('donationRows');
+  tbody.innerHTML = rows.map(d => {
+    const date = new Date(d.created_at).toLocaleString('ru-RU');
+    return `
+      <tr>
+        <td><img src="${d.image_data}"></td>
+        <td>${date}</td>
+        <td>${d.amount} ₽</td>
+        <td>${d.duration_sec} сек</td>
+        <td><span class="badge badge-${d.status}">${STATUS_LABELS[d.status] || d.status}</span></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadBalance() {
+  const res = await fetch('/api/payout/balance');
+  if (!res.ok) return;
+  const data = await res.json();
+  document.getElementById('balance').textContent = data.balance + ' ₽';
+  document.getElementById('payoutBtn').disabled = data.balance <= 0;
+}
+
+async function loadPayoutHistory() {
+  const res = await fetch('/api/payout/requests');
+  if (!res.ok) return;
+  const rows = await res.json();
+  const el = document.getElementById('payoutHistory');
+  el.innerHTML = rows.map(r => {
+    const date = new Date(r.requested_at).toLocaleString('ru-RU');
+    const statusText = r.status === 'paid' ? '✅ выплачено' : '⏳ ожидает выплаты';
+    return `<div>${date} — ${r.amount} ₽ — ${statusText}</div>`;
+  }).join('');
+}
+
+async function requestPayout() {
+  const res = await fetch('/api/payout/requests', { method: 'POST' });
+  const data = await res.json();
+  if (data.error) return alert(data.error);
+  alert(`Запрос на выплату ${data.amount} ₽ отправлен. Выплатим вручную по СБП в течение 24 часов.`);
+  loadBalance();
+  loadPayoutHistory();
+}
+
+(async () => {
+  if (!(await checkAuth())) return;
+  load();
+  loadDonations();
+  loadBalance();
+  loadPayoutHistory();
+  setInterval(load, 5000);
+  setInterval(loadDonations, 5000);
+  setInterval(loadBalance, 5000);
+})();
+</script>
+</body>
+</html>

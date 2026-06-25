@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Admin — выплаты</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:24px; }
+  table { width:100%; border-collapse: collapse; margin-top:16px; }
+  th, td { text-align:left; padding:10px; border-bottom:1px solid #333; }
+  th { color:#999; font-size:13px; }
+  button { padding:6px 12px; background:#2e7d32; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+  .empty { color:#777; margin-top:24px; }
+  input { padding:8px; background:#222; color:#eee; border:1px solid #444; border-radius:6px; margin-right:8px; }
+</style>
+</head>
+<body>
+  <h1>Запросы на выплату (вручную, без автоматизации)</h1>
+  <div>
+    <input id="key" placeholder="Admin key">
+    <button onclick="setKey()">Войти</button>
+  </div>
+  <table id="table" style="display:none">
+    <thead>
+      <tr><th>Когда запрошено</th><th>Стример</th><th>Телефон (СБП)</th><th>Сумма</th><th></th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="empty" id="empty" style="display:none">Нет ожидающих выплат.</p>
+
+<script>
+let key = localStorage.getItem('admin_key') || '';
+
+function setKey() {
+  key = document.getElementById('key').value.trim();
+  localStorage.setItem('admin_key', key);
+  load();
+}
+
+async function load() {
+  if (!key) return;
+  const res = await fetch('/api/admin/payout-requests?status=pending', { headers: { 'X-Admin-Key': key } });
+  if (!res.ok) { alert('Неверный admin key'); return; }
+  const rows = await res.json();
+  document.getElementById('table').style.display = rows.length ? 'table' : 'none';
+  document.getElementById('empty').style.display = rows.length ? 'none' : 'block';
+  document.getElementById('rows').innerHTML = rows.map(r => `
+    <tr>
+      <td>${new Date(r.requested_at).toLocaleString('ru-RU')}</td>
+      <td>${r.streamer_name} (${r.slug})</td>
+      <td>${r.payout_phone || '—'}</td>
+      <td>${r.amount} ₽</td>
+      <td><button onclick="markPaid('${r.id}')">Отметить выплаченным</button></td>
+    </tr>
+  `).join('');
+}
+
+async function markPaid(id) {
+  if (!confirm('Подтверждаешь, что перевёл деньги вручную по СБП?')) return;
+  await fetch(`/api/admin/payout-requests/${id}/mark-paid`, { method: 'POST', headers: { 'X-Admin-Key': key } });
+  load();
+}
+
+if (key) {
+  document.getElementById('key').value = key;
+  load();
+}
+</script>
+</body>
+</html>

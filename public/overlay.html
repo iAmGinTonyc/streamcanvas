@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>StreamCanvas Overlay</title>
+<style>
+  html, body { margin:0; background:transparent; overflow:hidden; }
+  #img { position:absolute; top:0; left:0; max-width:100vw; max-height:100vh; border-radius:10px; box-shadow:0 0 20px rgba(0,0,0,.6); display:none; }
+</style>
+</head>
+<body>
+  <img id="img">
+<script>
+const slug = new URLSearchParams(location.search).get('slug');
+async function tick() {
+  if (!slug) return;
+  const res = await fetch(`/api/overlay/${slug}/current`);
+  const data = await res.json();
+  const img = document.getElementById('img');
+  if (data.drawing) {
+    if (img.src !== data.drawing.image_data) img.src = data.drawing.image_data;
+    img.style.display = 'block';
+  } else {
+    img.style.display = 'none';
+  }
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>
