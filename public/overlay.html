@@ -5,12 +5,14 @@
 <title>Pay2Draw Overlay</title>
 <style>
   html, body { margin:0; background:transparent; overflow:hidden; height:100%; }
-  body { display:flex; align-items:center; justify-content:center; }
-  #img { width:100%; height:100%; object-fit:contain; border-radius:10px; box-shadow:0 0 20px rgba(0,0,0,.6); display:none; }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; }
+  #img { width:100%; max-height:85%; object-fit:contain; border-radius:10px; box-shadow:0 0 20px rgba(0,0,0,.6); display:none; }
+  #caption { display:none; color:#fff; font-family:system-ui, sans-serif; font-size:20px; font-weight:bold; text-align:center; text-shadow:0 2px 6px rgba(0,0,0,.9); max-width:90%; }
 </style>
 </head>
 <body>
   <img id="img">
+  <div id="caption"></div>
 <script>
 const slug = new URLSearchParams(location.search).get('slug');
 async function tick() {
@@ -18,11 +20,19 @@ async function tick() {
   const res = await fetch(`/api/overlay/${slug}/current`);
   const data = await res.json();
   const img = document.getElementById('img');
+  const caption = document.getElementById('caption');
   if (data.drawing) {
     if (img.src !== data.drawing.image_data) img.src = data.drawing.image_data;
     img.style.display = 'block';
+    if (data.drawing.caption) {
+      caption.textContent = data.drawing.caption;
+      caption.style.display = 'block';
+    } else {
+      caption.style.display = 'none';
+    }
   } else {
     img.style.display = 'none';
+    caption.style.display = 'none';
   }
 }
 tick();

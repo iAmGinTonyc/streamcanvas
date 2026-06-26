@@ -38,6 +38,9 @@ async function initSchema() {
     ALTER TABLE drawings ADD COLUMN IF NOT EXISTS platform_fee INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE drawings ADD COLUMN IF NOT EXISTS streamer_amount INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE drawings ADD COLUMN IF NOT EXISTS payment_id TEXT;
+    ALTER TABLE drawings ADD COLUMN IF NOT EXISTS caption TEXT;
+    ALTER TABLE drawings ADD COLUMN IF NOT EXISTS queue_at BIGINT;
+    ALTER TABLE drawings ADD COLUMN IF NOT EXISTS promo_code TEXT;
     UPDATE drawings SET streamer_amount = amount WHERE streamer_amount = 0 AND amount > 0;
     CREATE TABLE IF NOT EXISTS payout_requests (
       id TEXT PRIMARY KEY,
@@ -50,6 +53,14 @@ async function initSchema() {
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       streamer_id TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      id TEXT PRIMARY KEY,
+      streamer_id TEXT NOT NULL,
+      code TEXT UNIQUE NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      used_at BIGINT,
       created_at BIGINT NOT NULL
     );
   `);
@@ -211,7 +222,7 @@ app.get('/api/streamers/by-slug/:slug', asyncHandler(async (req, res) => {
 // --- viewer submits a drawing: creates it as awaiting_payment, returns a YooKassa payment URL ---
 // `free: true` skips payment entirely — temporary testing path, remove before real launch.
 app.post('/api/drawings', asyncHandler(async (req, res) => {
-  const { slug, image_data, duration_sec, free } = req.body;
+  const { slug, image_data, duration_sec, free, caption, promo_code } = req.body;
   const { rows } = await pool.query('SELECT * FROM streamers WHERE slug = $1', [slug]);
   const streamer = rows[0];
   if (!streamer) return res.status(404).json({ error: 'streamer not found' });
@@ -219,14 +230,32 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
   if (!Number.isInteger(duration_sec) || duration_sec < MIN_DURATION_SEC || duration_sec > MAX_DURATION_SEC) {
     return res.status(400).json({ error: 'недопустимая длительность показа' });
   }
+  const captionText = (caption || '').slice(0, 140) || null;
 
   const id = genId();
 
+  if (promo_code) {
+    const code = promo_code.trim().toUpperCase();
+    const { rows: promoRows } = await pool.query(
+      "SELECT * FROM promo_codes WHERE streamer_id = $1 AND code = $2 AND status = 'active' AND used_at IS NULL",
+      [streamer.id, code]
+    );
+    if (!promoRows[0]) return res.status(400).json({ error: 'Промокод недействителен или уже использован' });
+
+    await pool.query('UPDATE promo_codes SET used_at = $1 WHERE id = $2', [Date.now(), promoRows[0].id]);
+    await pool.query(
+      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, promo_code, created_at)
+       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5, $6, $7)`,
+      [id, streamer.id, image_data, duration_sec, captionText, code, Date.now()]
+    );
+    return res.json({ id, status: 'pending', free: true });
+  }
+
   if (free) {
     await pool.query(
-      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, created_at)
-       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5)`,
-      [id, streamer.id, image_data, duration_sec, Date.now()]
+      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, created_at)
+       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5, $6)`,
+      [id, streamer.id, image_data, duration_sec, captionText, Date.now()]
     );
     return res.json({ id, status: 'pending', free: true });
   }
@@ -242,9 +271,9 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
   const streamer_amount = amount - platform_fee;
 
   await pool.query(
-    `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'awaiting_payment', $8)`,
-    [id, streamer.id, image_data, duration_sec, amount, platform_fee, streamer_amount, Date.now()]
+    `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'awaiting_payment', $8, $9)`,
+    [id, streamer.id, image_data, duration_sec, amount, platform_fee, streamer_amount, captionText, Date.now()]
   );
 
   let payment;
@@ -311,7 +340,7 @@ app.get('/api/drawings', authStreamer, asyncHandler(async (req, res) => {
 app.post('/api/drawings/:id/approve', authStreamer, asyncHandler(async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM drawings WHERE id = $1 AND streamer_id = $2', [req.params.id, req.streamer.id]);
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
-  await pool.query("UPDATE drawings SET status = 'approved' WHERE id = $1", [rows[0].id]);
+  await pool.query("UPDATE drawings SET status = 'approved', queue_at = $1 WHERE id = $2", [Date.now(), rows[0].id]);
   res.json({ ok: true });
 }));
 
@@ -322,7 +351,29 @@ app.post('/api/drawings/:id/reject', authStreamer, asyncHandler(async (req, res)
   res.json({ ok: true });
 }));
 
-// --- overlay: shows current drawing on stream, picks oldest approved-not-yet-shown ---
+// --- streamer manually stops a currently-showing drawing ---
+app.post('/api/drawings/:id/stop', authStreamer, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT * FROM drawings WHERE id = $1 AND streamer_id = $2 AND status = 'showing'",
+    [req.params.id, req.streamer.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  await pool.query("UPDATE drawings SET status = 'shown', shown_until = NULL WHERE id = $1", [rows[0].id]);
+  res.json({ ok: true });
+}));
+
+// --- streamer re-queues a previously shown drawing to display it again ---
+app.post('/api/drawings/:id/replay', authStreamer, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT * FROM drawings WHERE id = $1 AND streamer_id = $2 AND status = 'shown'",
+    [req.params.id, req.streamer.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  await pool.query("UPDATE drawings SET status = 'approved', queue_at = $1 WHERE id = $2", [Date.now(), rows[0].id]);
+  res.json({ ok: true });
+}));
+
+// --- overlay: shows current drawing on stream, picks oldest queued approved-not-yet-shown ---
 app.get('/api/overlay/:slug/current', asyncHandler(async (req, res) => {
   const { rows: streamerRows } = await pool.query('SELECT * FROM streamers WHERE slug = $1', [req.params.slug]);
   const streamer = streamerRows[0];
@@ -336,8 +387,13 @@ app.get('/api/overlay/:slug/current', asyncHandler(async (req, res) => {
   let active = activeRows[0];
 
   if (!active) {
+    // expire any drawing whose time ran out so it doesn't stay stuck in 'showing'
+    await pool.query(
+      "UPDATE drawings SET status = 'shown', shown_until = NULL WHERE streamer_id = $1 AND status = 'showing' AND shown_until <= $2",
+      [streamer.id, now]
+    );
     const { rows: nextRows } = await pool.query(
-      "SELECT * FROM drawings WHERE streamer_id = $1 AND status = 'approved' ORDER BY created_at ASC LIMIT 1",
+      "SELECT * FROM drawings WHERE streamer_id = $1 AND status = 'approved' ORDER BY COALESCE(queue_at, created_at) ASC LIMIT 1",
       [streamer.id]
     );
     const next = nextRows[0];
@@ -353,6 +409,7 @@ app.get('/api/overlay/:slug/current', asyncHandler(async (req, res) => {
     drawing: {
       id: active.id,
       image_data: active.image_data,
+      caption: active.caption,
       shown_until: active.shown_until,
     },
   });
@@ -390,6 +447,47 @@ app.post('/api/payout/requests', authStreamer, asyncHandler(async (req, res) => 
     [id, req.streamer.id, balance, Date.now()]
   );
   res.json({ id, amount: balance, status: 'pending' });
+}));
+
+// --- promo codes: streamer-generated, redeemable for one free donation each ---
+function genPromoCode() {
+  return crypto.randomBytes(4).toString('hex').toUpperCase();
+}
+
+app.get('/api/promo-codes', authStreamer, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    'SELECT * FROM promo_codes WHERE streamer_id = $1 ORDER BY created_at DESC',
+    [req.streamer.id]
+  );
+  res.json(rows);
+}));
+
+app.post('/api/promo-codes', authStreamer, asyncHandler(async (req, res) => {
+  const count = Math.min(Math.max(parseInt(req.body.count, 10) || 1, 1), 10);
+  const created = [];
+  for (let i = 0; i < count; i++) {
+    const id = genId();
+    const code = genPromoCode();
+    await pool.query(
+      "INSERT INTO promo_codes (id, streamer_id, code, status, created_at) VALUES ($1, $2, $3, 'active', $4)",
+      [id, req.streamer.id, code, Date.now()]
+    );
+    created.push({ id, code, status: 'active' });
+  }
+  res.json(created);
+}));
+
+app.post('/api/promo-codes/:id/toggle', authStreamer, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM promo_codes WHERE id = $1 AND streamer_id = $2', [req.params.id, req.streamer.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  const newStatus = rows[0].status === 'active' ? 'deactivated' : 'active';
+  await pool.query('UPDATE promo_codes SET status = $1 WHERE id = $2', [newStatus, rows[0].id]);
+  res.json({ ok: true, status: newStatus });
+}));
+
+app.delete('/api/promo-codes/:id', authStreamer, asyncHandler(async (req, res) => {
+  await pool.query('DELETE FROM promo_codes WHERE id = $1 AND streamer_id = $2', [req.params.id, req.streamer.id]);
+  res.json({ ok: true });
 }));
 
 // --- admin: manual payouts, no automated money movement ---

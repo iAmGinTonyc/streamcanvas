@@ -5,12 +5,16 @@
 <title>Нарисуй стримеру — Pay2Draw</title>
 <style>
   body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:16px; display:flex; flex-direction:column; align-items:center; }
-  canvas { background:#fff; border-radius:8px; touch-action:none; max-width:100%; }
+  .canvas-wrap { position:relative; max-width:100%; border-radius:8px; overflow:hidden; }
+  .canvas-wrap canvas { display:block; touch-action:none; max-width:100%; }
+  #bgCanvas { position:relative; }
+  #drawCanvas { position:absolute; top:0; left:0; }
   .toolbar { display:flex; gap:8px; align-items:center; margin:12px 0; flex-wrap:wrap; justify-content:center; }
   input[type=color] { width:36px; height:36px; border:none; padding:0; }
   input[type=range] { width:100px; }
   select, button, input[type=number] { padding:8px 12px; border-radius:6px; border:1px solid #444; background:#222; color:#eee; cursor:pointer; }
   input[type=number] { width:90px; cursor:text; }
+  input[type=text] { padding:8px 12px; border-radius:6px; border:1px solid #444; background:#222; color:#eee; }
   .tool-label { font-size:12px; color:#888; display:flex; flex-direction:column; align-items:center; gap:4px; }
   #eraser.active { background:#5b5bd6; color:#fff; }
   .submit { background:#5b5bd6; color:#fff; border:none; font-weight:bold; }
@@ -23,6 +27,8 @@
   .banner.pending { border-color:#5b4b1f; }
   footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #2a2a2a; font-size: 12px; color: #777; line-height: 1.6; text-align:center; max-width:480px; }
   footer a { color: #999; }
+  .caption-input { width:480px; max-width:100%; box-sizing:border-box; margin-top:10px; }
+  .promo-link { background:none; border:none; color:#8ab4ff; text-decoration:underline; font-size:13px; padding:0; margin-top:6px; }
 
   .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:100; }
   .modal-box { background:#1c1c1c; border:1px solid #333; border-radius:14px; padding:28px 24px; max-width:340px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,.5); }
@@ -30,10 +36,14 @@
   .modal-title { font-size:17px; font-weight:bold; color:#fff; margin-bottom:8px; }
   .modal-text { font-size:14px; color:#aaa; line-height:1.5; }
   .modal-ok { margin-top:20px; width:100%; background:#5b5bd6; color:#fff; border:none; padding:10px; border-radius:8px; cursor:pointer; font-size:14px; }
+  .modal-box input[type=text] { width:100%; box-sizing:border-box; margin-top:12px; text-align:center; text-transform:uppercase; }
+  .modal-actions { display:flex; gap:8px; margin-top:16px; }
+  .modal-actions button { flex:1; }
 </style>
 </head>
 <body>
   <div class="banner" id="returnBanner" style="display:none"></div>
+
   <div class="modal-overlay" id="modalOverlay" style="display:none">
     <div class="modal-box">
       <div class="modal-icon" id="modalIcon">🎨</div>
@@ -42,15 +52,38 @@
       <button class="modal-ok" id="modalOk">ОК</button>
     </div>
   </div>
+
+  <div class="modal-overlay" id="promoModal" style="display:none">
+    <div class="modal-box">
+      <div class="modal-icon">🎁</div>
+      <div class="modal-title">Промокод</div>
+      <div class="modal-text">Введи промокод стримера для бесплатной отправки рисунка.</div>
+      <input type="text" id="promoInput" placeholder="КОД">
+      <div class="modal-actions">
+        <button id="promoCancel">Отмена</button>
+        <button class="submit" id="promoApply">Применить</button>
+      </div>
+    </div>
+  </div>
+
   <h2 id="title">Нарисуй для стримера</h2>
-  <canvas id="canvas" width="480" height="270"></canvas>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="bgCanvas" width="480" height="270"></canvas>
+    <canvas id="drawCanvas" width="480" height="270"></canvas>
+  </div>
+
   <div class="toolbar">
     <span class="tool-label">Кисть<input type="color" id="color" value="#ff0000"></span>
     <span class="tool-label">Фон<input type="color" id="bgColor" value="#ffffff"></span>
-    <input type="range" id="size" min="1" max="30" value="4">
+    <span class="tool-label">Размер<input type="range" id="size" min="1" max="30" value="4"></span>
+    <span class="tool-label">Прозрачность<input type="range" id="opacity" min="10" max="100" value="100"></span>
     <button type="button" id="eraser">Ластик</button>
+    <button type="button" id="undo">Отменить</button>
     <button id="clear">Очистить</button>
   </div>
+
+  <input type="text" class="caption-input" id="captionInput" placeholder="Подпись к рисунку (необязательно, до 140 символов)" maxlength="140">
 
   <div class="duration-row">
     <button type="button" class="preset" data-sec="60">1 мин</button>
@@ -66,6 +99,7 @@
   <p class="total" id="total">Итого: 110 ₽</p>
 
   <button class="submit" id="submit">Отправить донат</button>
+  <button type="button" class="promo-link" id="promoOpen">У меня промокод</button>
   <p class="price">Базовая отправка рисунка: 50 ₽ + 1 ₽ за каждую секунду показа на стриме.</p>
 
   <footer>
@@ -76,37 +110,68 @@
   </footer>
 
 <script>
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+const bgCanvas = document.getElementById('bgCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+const drawCanvas = document.getElementById('drawCanvas');
+const ctx = drawCanvas.getContext('2d');
 const bgColorInput = document.getElementById('bgColor');
 const eraserBtn = document.getElementById('eraser');
+const sizeInput = document.getElementById('size');
+const opacityInput = document.getElementById('opacity');
 let eraserMode = false;
 
 function fillBackground() {
-  ctx.fillStyle = bgColorInput.value;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  bgCtx.fillStyle = bgColorInput.value;
+  bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
 }
 fillBackground();
 ctx.lineCap = 'round';
+bgColorInput.addEventListener('input', fillBackground);
+
+// --- undo stack: snapshot the transparent drawing layer before each stroke ---
+const undoStack = [];
+function pushUndoSnapshot() {
+  undoStack.push(ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height));
+  if (undoStack.length > 30) undoStack.shift();
+}
+function undo() {
+  if (!undoStack.length) return;
+  const snapshot = undoStack.pop();
+  ctx.putImageData(snapshot, 0, 0);
+}
+document.getElementById('undo').onclick = undo;
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    undo();
+  }
+});
 
 let drawing = false, lastX = 0, lastY = 0;
 
 function pos(e) {
-  const rect = canvas.getBoundingClientRect();
+  const rect = drawCanvas.getBoundingClientRect();
   const t = e.touches ? e.touches[0] : e;
   return {
-    x: (t.clientX - rect.left) * (canvas.width / rect.width),
-    y: (t.clientY - rect.top) * (canvas.height / rect.height),
+    x: (t.clientX - rect.left) * (drawCanvas.width / rect.width),
+    y: (t.clientY - rect.top) * (drawCanvas.height / rect.height),
   };
 }
 
-function start(e) { drawing = true; const p = pos(e); lastX = p.x; lastY = p.y; }
+function start(e) {
+  drawing = true;
+  pushUndoSnapshot();
+  const p = pos(e);
+  lastX = p.x; lastY = p.y;
+}
 function move(e) {
   if (!drawing) return;
   e.preventDefault();
   const p = pos(e);
-  ctx.strokeStyle = eraserMode ? bgColorInput.value : document.getElementById('color').value;
-  ctx.lineWidth = document.getElementById('size').value;
+  ctx.globalCompositeOperation = eraserMode ? 'destination-out' : 'source-over';
+  ctx.globalAlpha = eraserMode ? 1 : (parseInt(opacityInput.value, 10) / 100);
+  ctx.strokeStyle = document.getElementById('color').value;
+  ctx.lineWidth = sizeInput.value;
   ctx.beginPath();
   ctx.moveTo(lastX, lastY);
   ctx.lineTo(p.x, p.y);
@@ -115,22 +180,34 @@ function move(e) {
 }
 function end() { drawing = false; }
 
-canvas.addEventListener('mousedown', start);
-canvas.addEventListener('mousemove', move);
-canvas.addEventListener('mouseup', end);
-canvas.addEventListener('mouseleave', end);
-canvas.addEventListener('touchstart', start);
-canvas.addEventListener('touchmove', move);
-canvas.addEventListener('touchend', end);
+drawCanvas.addEventListener('mousedown', start);
+drawCanvas.addEventListener('mousemove', move);
+drawCanvas.addEventListener('mouseup', end);
+drawCanvas.addEventListener('mouseleave', end);
+drawCanvas.addEventListener('touchstart', start);
+drawCanvas.addEventListener('touchmove', move);
+drawCanvas.addEventListener('touchend', end);
 
-document.getElementById('clear').onclick = fillBackground;
-bgColorInput.addEventListener('input', fillBackground);
+document.getElementById('clear').onclick = () => {
+  pushUndoSnapshot();
+  ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+};
 
 eraserBtn.onclick = () => {
   eraserMode = !eraserMode;
   eraserBtn.classList.toggle('active', eraserMode);
   eraserBtn.textContent = eraserMode ? 'Ластик ✓' : 'Ластик';
 };
+
+function composite() {
+  const out = document.createElement('canvas');
+  out.width = bgCanvas.width;
+  out.height = bgCanvas.height;
+  const outCtx = out.getContext('2d');
+  outCtx.drawImage(bgCanvas, 0, 0);
+  outCtx.drawImage(drawCanvas, 0, 0);
+  return out.toDataURL('image/png');
+}
 
 function showModal({ icon = '🎨', title = '', text = '' }) {
   document.getElementById('modalIcon').textContent = icon;
@@ -141,6 +218,11 @@ function showModal({ icon = '🎨', title = '', text = '' }) {
 document.getElementById('modalOk').onclick = () => {
   document.getElementById('modalOverlay').style.display = 'none';
 };
+
+const promoModal = document.getElementById('promoModal');
+const promoInput = document.getElementById('promoInput');
+document.getElementById('promoOpen').onclick = () => { promoModal.style.display = 'flex'; promoInput.focus(); };
+document.getElementById('promoCancel').onclick = () => { promoModal.style.display = 'none'; };
 
 const slug = new URLSearchParams(location.search).get('slug');
 
@@ -171,27 +253,37 @@ durationInput.addEventListener('input', updateTotal);
 freeMode.addEventListener('change', updateTotal);
 updateTotal();
 
-document.getElementById('submit').onclick = async () => {
+async function submitDrawing(extra) {
   if (!slug) return alert('Не указан стример (нет slug в ссылке)');
   const duration_sec = parseInt(durationInput.value, 10);
   if (!duration_sec || duration_sec < 10 || duration_sec > 3600) {
-    return alert('Длительность должна быть от 10 до 3600 секунд');
+    alert('Длительность должна быть от 10 до 3600 секунд');
+    return null;
   }
+  return fetch('/api/drawings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      slug,
+      image_data: composite(),
+      duration_sec,
+      caption: document.getElementById('captionInput').value.trim(),
+      ...extra,
+    }),
+  }).then(r => r.json());
+}
+
+document.getElementById('submit').onclick = async () => {
   const submitBtn = document.getElementById('submit');
   submitBtn.disabled = true;
   submitBtn.textContent = freeMode.checked ? 'Отправляем…' : 'Подключаем оплату…';
   try {
-    const res = await fetch('/api/drawings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        slug,
-        image_data: canvas.toDataURL('image/png'),
-        duration_sec,
-        free: freeMode.checked,
-      }),
-    });
-    const data = await res.json();
+    const data = await submitDrawing({ free: freeMode.checked });
+    if (!data) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Отправить донат';
+      return;
+    }
     if (data.error) {
       alert(data.error);
       submitBtn.disabled = false;
@@ -214,6 +306,21 @@ document.getElementById('submit').onclick = async () => {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Отправить донат';
   }
+};
+
+document.getElementById('promoApply').onclick = async () => {
+  const code = promoInput.value.trim();
+  if (!code) return;
+  const data = await submitDrawing({ promo_code: code });
+  if (!data) return;
+  if (data.error) return alert(data.error);
+  promoModal.style.display = 'none';
+  promoInput.value = '';
+  showModal({
+    icon: '🎁',
+    title: 'Донат по промокоду отправлен!',
+    text: 'Рисунок отправлен стримеру на модерацию.',
+  });
 };
 
 if (slug) {

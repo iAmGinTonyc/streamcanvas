@@ -16,18 +16,22 @@
 
   .feed { display:flex; flex-direction:column; gap:12px; margin-top:16px; }
   .feed-item { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:12px; display:flex; gap:12px; max-width:460px; }
-  .feed-item img { width:80px; height:45px; object-fit:cover; border-radius:6px; background:#fff; flex-shrink:0; }
+  .feed-item img { width:80px; height:45px; object-fit:cover; border-radius:6px; background:#fff; flex-shrink:0; cursor:zoom-in; }
   .feed-body { flex:1; min-width:0; }
   .feed-meta { font-size:13px; color:#aaa; margin-bottom:6px; }
-  .feed-actions { display:flex; gap:8px; margin-top:8px; }
+  .feed-caption { font-size:13px; color:#ddd; font-style:italic; margin-bottom:6px; }
+  .feed-actions { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
   button { padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
   .approve { background:#2e7d32; color:#fff; }
   .reject { background:#7d2e2e; color:#fff; }
+  .stop { background:#7d5a1f; color:#fff; }
+  .replay { background:#1f3b5b; color:#fff; }
 
   .badge { padding:3px 8px; border-radius:5px; font-size:12px; }
   .badge-pending { background:#5b4b1f; color:#f0c674; }
   .badge-approved { background:#1f4b2f; color:#7ad08a; }
   .badge-showing { background:#1f3b5b; color:#7ab0f0; }
+  .badge-shown { background:#333; color:#aaa; }
   .badge-rejected { background:#4b1f1f; color:#f08a8a; }
   .badge-awaiting_payment { background:#333; color:#999; }
   .badge-payment_failed { background:#4b1f1f; color:#f08a8a; }
@@ -51,10 +55,28 @@
   .copy-row input { flex:1; min-width:0; background:#111; border:1px solid #333; color:#666; border-radius:6px; padding:6px 8px; font-size:12px; }
   .copy-btn { padding:6px 10px; background:#333; color:#eee; border:none; border-radius:6px; cursor:pointer; font-size:12px; white-space:nowrap; }
   .copy-btn.copied { background:#2e7d32; }
+
+  .promo-box { background:#1c1c1c; border:1px solid #333; border-radius:10px; padding:16px; margin-top:16px; }
+  .promo-gen { display:flex; gap:8px; margin-top:8px; }
+  .promo-gen input { width:60px; background:#111; border:1px solid #333; color:#eee; border-radius:6px; padding:6px 8px; }
+  .promo-gen button { background:#5b5bd6; color:#fff; flex:1; padding:8px; font-size:13px; }
+  .promo-list { margin-top:12px; display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto; }
+  .promo-row { display:flex; align-items:center; gap:6px; font-size:12px; background:#111; border:1px solid #2a2a2a; border-radius:6px; padding:6px 8px; }
+  .promo-code { font-family:monospace; flex:1; }
+  .promo-row button { padding:4px 8px; font-size:11px; }
+  .promo-status { padding:2px 6px; border-radius:4px; font-size:11px; }
+  .promo-status.active { background:#1f4b2f; color:#7ad08a; }
+  .promo-status.deactivated { background:#4b1f1f; color:#f08a8a; }
+  .promo-status.used { background:#333; color:#999; }
+
+  .lightbox { position:fixed; inset:0; background:rgba(0,0,0,.9); display:none; align-items:center; justify-content:center; z-index:200; cursor:zoom-out; padding:24px; box-sizing:border-box; }
+  .lightbox img { max-width:100%; max-height:100%; border-radius:10px; box-shadow:0 10px 50px rgba(0,0,0,.6); }
 </style>
 </head>
 <body>
   <h1 id="title">Кабинет <button onclick="logout()" style="float:right;background:#333;color:#eee;padding:6px 12px;font-size:13px;">Выйти</button></h1>
+
+  <div class="lightbox" id="lightbox"><img id="lightboxImg"></div>
 
   <div class="layout">
     <div class="feed-col">
@@ -86,6 +108,15 @@
             <button class="copy-btn" data-target="overlayLink">Копировать</button>
           </div>
         </div>
+      </div>
+
+      <div class="promo-box">
+        <div>Промокоды на бесплатный донат</div>
+        <div class="promo-gen">
+          <input type="number" id="promoCount" min="1" max="10" value="1">
+          <button id="promoGenBtn">Сгенерировать</button>
+        </div>
+        <div class="promo-list" id="promoList"></div>
       </div>
     </div>
   </div>
@@ -127,20 +158,55 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
   });
 });
 
+// --- lightbox: expand a drawing within the page (not the OS Fullscreen API) ---
+const lightbox = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightboxImg');
+lightbox.addEventListener('click', () => { lightbox.style.display = 'none'; });
+
+// --- notification beep: Web Audio tone, no audio file needed ---
+let audioCtx;
+function playNotificationSound() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.4);
+  } catch (e) { /* audio not available */ }
+}
+
 const STATUS_LABELS = {
   awaiting_payment: 'ожидает оплаты',
   payment_failed: 'оплата не прошла',
   pending: 'на модерации',
   approved: 'в очереди показа',
-  showing: 'показано',
+  showing: 'сейчас в эфире',
+  shown: 'показ завершён',
   rejected: 'отклонено',
 };
+
+let knownIds = null;
 
 async function loadFeed() {
   const res = await fetch('/api/drawings?limit=50');
   if (res.status === 401) return window.location.href = '/login.html';
   if (!res.ok) return;
   const rows = await res.json();
+
+  if (knownIds === null) {
+    knownIds = new Set(rows.map(d => d.id));
+  } else {
+    const hasNewPending = rows.some(d => d.status === 'pending' && !knownIds.has(d.id));
+    if (hasNewPending) playNotificationSound();
+    knownIds = new Set(rows.map(d => d.id));
+  }
+
   const feed = document.getElementById('feed');
   const empty = document.getElementById('empty');
   empty.style.display = rows.length ? 'none' : 'block';
@@ -150,16 +216,27 @@ async function loadFeed() {
     const needsModeration = d.status === 'pending';
     return `
       <div class="feed-item" data-id="${d.id}">
-        <img src="${d.image_data}">
+        <img src="${d.image_data}" class="feed-thumb">
         <div class="feed-body">
           <div class="feed-meta">
             ${date} · ${d.amount} ₽ <span style="color:#777">(тебе ${d.streamer_amount} ₽)</span> · показ ${d.duration_sec} сек
           </div>
+          ${d.caption ? `<div class="feed-caption">«${d.caption}»</div>` : ''}
           <span class="badge badge-${d.status}">${STATUS_LABELS[d.status] || d.status}</span>
           ${needsModeration ? `
             <div class="feed-actions">
               <button class="approve">Показать</button>
               <button class="reject">Отклонить</button>
+            </div>
+          ` : ''}
+          ${d.status === 'showing' ? `
+            <div class="feed-actions">
+              <button class="stop">Снять с эфира</button>
+            </div>
+          ` : ''}
+          ${d.status === 'shown' ? `
+            <div class="feed-actions">
+              <button class="replay">Показать снова</button>
             </div>
           ` : ''}
         </div>
@@ -171,8 +248,17 @@ async function loadFeed() {
     const id = item.dataset.id;
     const approveBtn = item.querySelector('.approve');
     const rejectBtn = item.querySelector('.reject');
+    const stopBtn = item.querySelector('.stop');
+    const replayBtn = item.querySelector('.replay');
+    const thumb = item.querySelector('.feed-thumb');
     if (approveBtn) approveBtn.onclick = () => act(id, 'approve');
     if (rejectBtn) rejectBtn.onclick = () => act(id, 'reject');
+    if (stopBtn) stopBtn.onclick = () => act(id, 'stop');
+    if (replayBtn) replayBtn.onclick = () => act(id, 'replay');
+    thumb.onclick = () => {
+      lightboxImg.src = thumb.src;
+      lightbox.style.display = 'flex';
+    };
   });
 }
 
@@ -210,11 +296,59 @@ async function requestPayout() {
   loadPayoutHistory();
 }
 
+function promoStatusLabel(p) {
+  if (p.used_at) return { cls: 'used', text: 'использован' };
+  if (p.status === 'deactivated') return { cls: 'deactivated', text: 'деактивирован' };
+  return { cls: 'active', text: 'активен' };
+}
+
+async function loadPromoCodes() {
+  const res = await fetch('/api/promo-codes');
+  if (!res.ok) return;
+  const rows = await res.json();
+  const el = document.getElementById('promoList');
+  el.innerHTML = rows.map(p => {
+    const label = promoStatusLabel(p);
+    const toggleText = p.status === 'active' ? 'Деактивировать' : 'Активировать';
+    return `
+      <div class="promo-row" data-id="${p.id}">
+        <span class="promo-code">${p.code}</span>
+        <span class="promo-status ${label.cls}">${label.text}</span>
+        <button class="promo-toggle">${toggleText}</button>
+        <button class="promo-delete">Удалить</button>
+      </div>
+    `;
+  }).join('');
+
+  el.querySelectorAll('.promo-row').forEach(row => {
+    const id = row.dataset.id;
+    row.querySelector('.promo-toggle').onclick = async () => {
+      await fetch(`/api/promo-codes/${id}/toggle`, { method: 'POST' });
+      loadPromoCodes();
+    };
+    row.querySelector('.promo-delete').onclick = async () => {
+      await fetch(`/api/promo-codes/${id}`, { method: 'DELETE' });
+      loadPromoCodes();
+    };
+  });
+}
+
+document.getElementById('promoGenBtn').onclick = async () => {
+  const count = Math.min(Math.max(parseInt(document.getElementById('promoCount').value, 10) || 1, 1), 10);
+  await fetch('/api/promo-codes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ count }),
+  });
+  loadPromoCodes();
+};
+
 (async () => {
   if (!(await checkAuth())) return;
   loadFeed();
   loadBalance();
   loadPayoutHistory();
+  loadPromoCodes();
   setInterval(loadFeed, 5000);
   setInterval(loadBalance, 5000);
 })();
