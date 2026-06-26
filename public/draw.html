@@ -140,6 +140,7 @@ function fillBackground() {
 fillBackground();
 ctx.lineCap = 'round';
 bgColorInput.addEventListener('input', () => {
+  pushUndoSnapshot();
   bgTransparent = false;
   document.getElementById('transparentBg').classList.remove('active');
   fillBackground();
@@ -147,6 +148,7 @@ bgColorInput.addEventListener('input', () => {
 
 const transparentBgBtn = document.getElementById('transparentBg');
 transparentBgBtn.onclick = () => {
+  pushUndoSnapshot();
   bgTransparent = !bgTransparent;
   transparentBgBtn.classList.toggle('active', bgTransparent);
   fillBackground();
@@ -158,6 +160,7 @@ function pushUndoSnapshot() {
   undoStack.push({
     draw: ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height),
     bg: bgCtx.getImageData(0, 0, bgCanvas.width, bgCanvas.height),
+    bgTransparent,
   });
   if (undoStack.length > 30) undoStack.shift();
 }
@@ -166,6 +169,8 @@ function undo() {
   const snapshot = undoStack.pop();
   ctx.putImageData(snapshot.draw, 0, 0);
   bgCtx.putImageData(snapshot.bg, 0, 0);
+  bgTransparent = snapshot.bgTransparent;
+  transparentBgBtn.classList.toggle('active', bgTransparent);
 }
 document.getElementById('undo').onclick = undo;
 window.addEventListener('keydown', (e) => {
