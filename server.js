@@ -224,9 +224,9 @@ app.get('/api/streamers/by-slug/:slug', asyncHandler(async (req, res) => {
 }));
 
 // --- viewer submits a drawing: creates it as awaiting_payment, returns a YooKassa payment URL ---
-// `free: true` skips payment entirely — temporary testing path, remove before real launch.
+// a valid promo_code is the only way to skip payment — there is no generic "free" testing flag.
 app.post('/api/drawings', asyncHandler(async (req, res) => {
-  const { slug, image_data, free, caption, promo_code, sound_effect } = req.body;
+  const { slug, image_data, caption, promo_code, sound_effect } = req.body;
   const duration_sec = promo_code ? PROMO_DURATION_SEC : req.body.duration_sec;
   const { rows } = await pool.query('SELECT * FROM streamers WHERE slug = $1', [slug]);
   const streamer = rows[0];
@@ -253,15 +253,6 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
       `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, promo_code, sound_effect, created_at)
        VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5, $6, $7, $8)`,
       [id, streamer.id, image_data, duration_sec, captionText, code, soundEffect, Date.now()]
-    );
-    return res.json({ id, status: 'pending', free: true });
-  }
-
-  if (free) {
-    await pool.query(
-      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, sound_effect, created_at)
-       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5, $6, $7)`,
-      [id, streamer.id, image_data, duration_sec, captionText, soundEffect, Date.now()]
     );
     return res.json({ id, status: 'pending', free: true });
   }

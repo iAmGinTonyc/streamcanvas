@@ -105,10 +105,6 @@
     <input type="number" id="durationInput" min="10" max="3600" value="60" step="1"> сек
   </div>
 
-  <div class="duration-row">
-    <label><input type="checkbox" id="freeMode"> Бесплатно (тест, временно)</label>
-  </div>
-
   <p class="total" id="total">Итого: 110 ₽</p>
 
   <button class="submit" id="submit">Отправить донат</button>
@@ -339,18 +335,13 @@ const slug = new URLSearchParams(location.search).get('slug');
 const BASE_PRICE = 50;
 const RATE_PER_SEC = 1;
 const durationInput = document.getElementById('durationInput');
-const freeMode = document.getElementById('freeMode');
 const totalEl = document.getElementById('total');
 
 function updateTotal() {
   if (parseInt(durationInput.value, 10) > 3600) durationInput.value = 3600;
   const sec = parseInt(durationInput.value, 10) || 0;
-  if (freeMode.checked) {
-    totalEl.textContent = 'Итого: 0 ₽ (тестовый бесплатный донат)';
-  } else {
-    const total = BASE_PRICE + sec * RATE_PER_SEC;
-    totalEl.textContent = `Итого: ${total} ₽`;
-  }
+  const total = BASE_PRICE + sec * RATE_PER_SEC;
+  totalEl.textContent = `Итого: ${total} ₽`;
 }
 
 document.querySelectorAll('.preset').forEach(btn => {
@@ -360,7 +351,6 @@ document.querySelectorAll('.preset').forEach(btn => {
   };
 });
 durationInput.addEventListener('input', updateTotal);
-freeMode.addEventListener('change', updateTotal);
 updateTotal();
 
 async function submitDrawing(extra) {
@@ -387,9 +377,9 @@ async function submitDrawing(extra) {
 document.getElementById('submit').onclick = async () => {
   const submitBtn = document.getElementById('submit');
   submitBtn.disabled = true;
-  submitBtn.textContent = freeMode.checked ? 'Отправляем…' : 'Подключаем оплату…';
+  submitBtn.textContent = 'Подключаем оплату…';
   try {
-    const data = await submitDrawing({ free: freeMode.checked });
+    const data = await submitDrawing({});
     if (!data) {
       submitBtn.disabled = false;
       submitBtn.textContent = 'Отправить донат';
@@ -397,16 +387,6 @@ document.getElementById('submit').onclick = async () => {
     }
     if (data.error) {
       alert(data.error);
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Отправить донат';
-      return;
-    }
-    if (data.free) {
-      showModal({
-        icon: '✅',
-        title: 'Донат отправлен!',
-        text: 'Тестовый донат отправлен стримеру на модерацию.',
-      });
       submitBtn.disabled = false;
       submitBtn.textContent = 'Отправить донат';
       return;
