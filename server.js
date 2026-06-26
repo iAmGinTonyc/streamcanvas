@@ -41,6 +41,8 @@ async function initSchema() {
     ALTER TABLE drawings ADD COLUMN IF NOT EXISTS caption TEXT;
     ALTER TABLE drawings ADD COLUMN IF NOT EXISTS queue_at BIGINT;
     ALTER TABLE drawings ADD COLUMN IF NOT EXISTS promo_code TEXT;
+    ALTER TABLE drawings ADD COLUMN IF NOT EXISTS sound_effect TEXT;
+    ALTER TABLE drawings ADD COLUMN IF NOT EXISTS sound_played BOOLEAN NOT NULL DEFAULT false;
     UPDATE drawings SET streamer_amount = amount WHERE streamer_amount = 0 AND amount > 0;
     CREATE TABLE IF NOT EXISTS payout_requests (
       id TEXT PRIMARY KEY,
@@ -78,6 +80,8 @@ const BASE_PRICE = 50; // отправка рисунка
 const RATE_PER_SEC = 1; // цена за каждую секунду показа
 const MIN_DURATION_SEC = 10;
 const MAX_DURATION_SEC = 3600;
+const PROMO_DURATION_SEC = 60; // донаты по промокоду всегда показываются ровно 1 минуту
+const SOUND_EFFECTS = ['bell', 'horn', 'laser', 'drum'];
 
 function calcAmount(duration_sec) {
   if (!Number.isInteger(duration_sec) || duration_sec < MIN_DURATION_SEC || duration_sec > MAX_DURATION_SEC) {
@@ -222,7 +226,8 @@ app.get('/api/streamers/by-slug/:slug', asyncHandler(async (req, res) => {
 // --- viewer submits a drawing: creates it as awaiting_payment, returns a YooKassa payment URL ---
 // `free: true` skips payment entirely — temporary testing path, remove before real launch.
 app.post('/api/drawings', asyncHandler(async (req, res) => {
-  const { slug, image_data, duration_sec, free, caption, promo_code } = req.body;
+  const { slug, image_data, free, caption, promo_code, sound_effect } = req.body;
+  const duration_sec = promo_code ? PROMO_DURATION_SEC : req.body.duration_sec;
   const { rows } = await pool.query('SELECT * FROM streamers WHERE slug = $1', [slug]);
   const streamer = rows[0];
   if (!streamer) return res.status(404).json({ error: 'streamer not found' });
@@ -230,7 +235,8 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
   if (!Number.isInteger(duration_sec) || duration_sec < MIN_DURATION_SEC || duration_sec > MAX_DURATION_SEC) {
     return res.status(400).json({ error: 'недопустимая длительность показа' });
   }
-  const captionText = (caption || '').slice(0, 140) || null;
+  const captionText = (caption || '').slice(0, 20) || null;
+  const soundEffect = SOUND_EFFECTS.includes(sound_effect) ? sound_effect : null;
 
   const id = genId();
 
@@ -244,18 +250,18 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
 
     await pool.query('UPDATE promo_codes SET used_at = $1 WHERE id = $2', [Date.now(), promoRows[0].id]);
     await pool.query(
-      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, promo_code, created_at)
-       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5, $6, $7)`,
-      [id, streamer.id, image_data, duration_sec, captionText, code, Date.now()]
+      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, promo_code, sound_effect, created_at)
+       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5, $6, $7, $8)`,
+      [id, streamer.id, image_data, duration_sec, captionText, code, soundEffect, Date.now()]
     );
     return res.json({ id, status: 'pending', free: true });
   }
 
   if (free) {
     await pool.query(
-      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, created_at)
-       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5, $6)`,
-      [id, streamer.id, image_data, duration_sec, captionText, Date.now()]
+      `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, sound_effect, created_at)
+       VALUES ($1, $2, $3, $4, 0, 0, 0, 'pending', $5, $6, $7)`,
+      [id, streamer.id, image_data, duration_sec, captionText, soundEffect, Date.now()]
     );
     return res.json({ id, status: 'pending', free: true });
   }
@@ -271,9 +277,9 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
   const streamer_amount = amount - platform_fee;
 
   await pool.query(
-    `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'awaiting_payment', $8, $9)`,
-    [id, streamer.id, image_data, duration_sec, amount, platform_fee, streamer_amount, captionText, Date.now()]
+    `INSERT INTO drawings (id, streamer_id, image_data, duration_sec, amount, platform_fee, streamer_amount, status, caption, sound_effect, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'awaiting_payment', $8, $9, $10)`,
+    [id, streamer.id, image_data, duration_sec, amount, platform_fee, streamer_amount, captionText, soundEffect, Date.now()]
   );
 
   let payment;
@@ -404,7 +410,22 @@ app.get('/api/overlay/:slug/current', asyncHandler(async (req, res) => {
     }
   }
 
-  if (!active) return res.json({ drawing: null });
+  // atomically claim the next not-yet-played sound from a just-approved donation, so it fires exactly once
+  const { rows: soundRows } = await pool.query(
+    `UPDATE drawings SET sound_played = true
+     WHERE id = (
+       SELECT id FROM drawings
+       WHERE streamer_id = $1 AND sound_effect IS NOT NULL AND sound_played = false
+         AND status NOT IN ('pending', 'rejected', 'awaiting_payment', 'payment_failed')
+       ORDER BY COALESCE(queue_at, created_at) ASC
+       LIMIT 1
+     )
+     RETURNING sound_effect`,
+    [streamer.id]
+  );
+  const sound = soundRows[0] ? soundRows[0].sound_effect : null;
+
+  if (!active) return res.json({ drawing: null, sound });
   res.json({
     drawing: {
       id: active.id,
@@ -412,6 +433,7 @@ app.get('/api/overlay/:slug/current', asyncHandler(async (req, res) => {
       caption: active.caption,
       shown_until: active.shown_until,
     },
+    sound,
   });
 }));
 

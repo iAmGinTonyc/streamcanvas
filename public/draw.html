@@ -17,6 +17,10 @@
   input[type=text] { padding:8px 12px; border-radius:6px; border:1px solid #444; background:#222; color:#eee; }
   .tool-label { font-size:12px; color:#888; display:flex; flex-direction:column; align-items:center; gap:4px; }
   #eraser.active { background:#5b5bd6; color:#fff; }
+  #transparentBg.active { background:#5b5bd6; color:#fff; }
+  .sound-panel { display:none; gap:8px; margin-top:8px; flex-wrap:wrap; justify-content:center; }
+  .sound-panel button { background:#222; border:1px solid #444; }
+  .sound-panel button.selected { background:#5b5bd6; border-color:#5b5bd6; }
   .submit { background:#5b5bd6; color:#fff; border:none; font-weight:bold; }
   .price { margin-top:8px; color:#aaa; font-size:14px; }
   .duration-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; margin:6px 0; }
@@ -76,6 +80,7 @@
   <div class="toolbar">
     <span class="tool-label">Кисть<input type="color" id="color" value="#ff0000"></span>
     <span class="tool-label">Фон<input type="color" id="bgColor" value="#ffffff"></span>
+    <button type="button" id="transparentBg">Без фона</button>
     <span class="tool-label">Размер<input type="range" id="size" min="1" max="30" value="4"></span>
     <span class="tool-label">Прозрачность<input type="range" id="opacity" min="10" max="100" value="100"></span>
     <button type="button" id="eraser">Ластик</button>
@@ -83,7 +88,15 @@
     <button id="clear">Очистить</button>
   </div>
 
-  <input type="text" class="caption-input" id="captionInput" placeholder="Подпись к рисунку (необязательно, до 140 символов)" maxlength="140">
+  <input type="text" class="caption-input" id="captionInput" placeholder="Подпись к рисунку (необязательно, до 20 символов)" maxlength="20">
+
+  <button type="button" id="soundToggle" class="promo-link" style="margin-top:10px">+ Добавить звук</button>
+  <div class="sound-panel" id="soundPanel">
+    <button type="button" class="sound-btn" data-sound="bell">🔔 Колокольчик</button>
+    <button type="button" class="sound-btn" data-sound="horn">📢 Гудок</button>
+    <button type="button" class="sound-btn" data-sound="laser">⚡ Лазер</button>
+    <button type="button" class="sound-btn" data-sound="drum">🥁 Барабан</button>
+  </div>
 
   <div class="duration-row">
     <button type="button" class="preset" data-sec="60">1 мин</button>
@@ -120,24 +133,43 @@ const sizeInput = document.getElementById('size');
 const opacityInput = document.getElementById('opacity');
 let eraserMode = false;
 
+let bgTransparent = false;
 function fillBackground() {
-  bgCtx.fillStyle = bgColorInput.value;
-  bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+  bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+  if (!bgTransparent) {
+    bgCtx.fillStyle = bgColorInput.value;
+    bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+  }
 }
 fillBackground();
 ctx.lineCap = 'round';
-bgColorInput.addEventListener('input', fillBackground);
+bgColorInput.addEventListener('input', () => {
+  bgTransparent = false;
+  document.getElementById('transparentBg').classList.remove('active');
+  fillBackground();
+});
 
-// --- undo stack: snapshot the transparent drawing layer before each stroke ---
+const transparentBgBtn = document.getElementById('transparentBg');
+transparentBgBtn.onclick = () => {
+  bgTransparent = !bgTransparent;
+  transparentBgBtn.classList.toggle('active', bgTransparent);
+  fillBackground();
+};
+
+// --- undo stack: snapshot both layers before each stroke (eraser can affect both) ---
 const undoStack = [];
 function pushUndoSnapshot() {
-  undoStack.push(ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height));
+  undoStack.push({
+    draw: ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height),
+    bg: bgCtx.getImageData(0, 0, bgCanvas.width, bgCanvas.height),
+  });
   if (undoStack.length > 30) undoStack.shift();
 }
 function undo() {
   if (!undoStack.length) return;
   const snapshot = undoStack.pop();
-  ctx.putImageData(snapshot, 0, 0);
+  ctx.putImageData(snapshot.draw, 0, 0);
+  bgCtx.putImageData(snapshot.bg, 0, 0);
 }
 document.getElementById('undo').onclick = undo;
 window.addEventListener('keydown', (e) => {
@@ -164,18 +196,36 @@ function start(e) {
   const p = pos(e);
   lastX = p.x; lastY = p.y;
 }
+function strokePath(targetCtx, lineWidth) {
+  targetCtx.lineWidth = lineWidth;
+  targetCtx.beginPath();
+  targetCtx.moveTo(lastX, lastY);
+  targetCtx.lineTo(currentX, currentY);
+  targetCtx.stroke();
+}
+
+let currentX = 0, currentY = 0;
 function move(e) {
   if (!drawing) return;
   e.preventDefault();
   const p = pos(e);
-  ctx.globalCompositeOperation = eraserMode ? 'destination-out' : 'source-over';
-  ctx.globalAlpha = eraserMode ? 1 : (parseInt(opacityInput.value, 10) / 100);
-  ctx.strokeStyle = document.getElementById('color').value;
-  ctx.lineWidth = sizeInput.value;
-  ctx.beginPath();
-  ctx.moveTo(lastX, lastY);
-  ctx.lineTo(p.x, p.y);
-  ctx.stroke();
+  currentX = p.x; currentY = p.y;
+  const lineWidth = sizeInput.value;
+
+  if (eraserMode) {
+    // eraser clears through both the drawing layer and the background layer
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.globalAlpha = 1;
+    strokePath(ctx, lineWidth);
+    bgCtx.globalCompositeOperation = 'destination-out';
+    bgCtx.globalAlpha = 1;
+    strokePath(bgCtx, lineWidth);
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = parseInt(opacityInput.value, 10) / 100;
+    ctx.strokeStyle = document.getElementById('color').value;
+    strokePath(ctx, lineWidth);
+  }
   lastX = p.x; lastY = p.y;
 }
 function end() { drawing = false; }
@@ -191,6 +241,7 @@ drawCanvas.addEventListener('touchend', end);
 document.getElementById('clear').onclick = () => {
   pushUndoSnapshot();
   ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  fillBackground();
 };
 
 eraserBtn.onclick = () => {
@@ -208,6 +259,65 @@ function composite() {
   outCtx.drawImage(drawCanvas, 0, 0);
   return out.toDataURL('image/png');
 }
+
+// --- preset sound effects: synthesized via Web Audio, no audio files needed ---
+function playPresetSound(id) {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    if (id === 'bell') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1500, now);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+      osc.start(now); osc.stop(now + 0.6);
+    } else if (id === 'horn') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, now);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.5);
+      osc.start(now); osc.stop(now + 0.5);
+    } else if (id === 'laser') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(1400, now);
+      osc.frequency.exponentialRampToValueAtTime(150, now + 0.3);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.start(now); osc.stop(now + 0.3);
+    } else if (id === 'drum') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(40, now + 0.2);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.start(now); osc.stop(now + 0.25);
+    }
+  } catch (e) { /* audio not available */ }
+}
+
+let selectedSound = null;
+const soundPanel = document.getElementById('soundPanel');
+document.getElementById('soundToggle').onclick = () => {
+  soundPanel.style.display = soundPanel.style.display === 'flex' ? 'none' : 'flex';
+};
+document.querySelectorAll('.sound-btn').forEach(btn => {
+  btn.onclick = () => {
+    const id = btn.dataset.sound;
+    playPresetSound(id);
+    if (selectedSound === id) {
+      selectedSound = null;
+      btn.classList.remove('selected');
+    } else {
+      selectedSound = id;
+      document.querySelectorAll('.sound-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+    }
+  };
+});
 
 function showModal({ icon = '🎨', title = '', text = '' }) {
   document.getElementById('modalIcon').textContent = icon;
@@ -268,6 +378,7 @@ async function submitDrawing(extra) {
       image_data: composite(),
       duration_sec,
       caption: document.getElementById('captionInput').value.trim(),
+      sound_effect: selectedSound,
       ...extra,
     }),
   }).then(r => r.json());
