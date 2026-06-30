@@ -2,23 +2,37 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Admin — выплаты</title>
+<title>Admin — Pay2Draw</title>
 <style>
   body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:24px; }
+  h1 { font-size:18px; margin-top:36px; }
+  h1:first-of-type { margin-top:0; }
   table { width:100%; border-collapse: collapse; margin-top:16px; }
-  th, td { text-align:left; padding:10px; border-bottom:1px solid #333; }
+  th, td { text-align:left; padding:10px; border-bottom:1px solid #333; vertical-align:middle; }
   th { color:#999; font-size:13px; }
-  button { padding:6px 12px; background:#2e7d32; color:#fff; border:none; border-radius:6px; cursor:pointer; }
-  .empty { color:#777; margin-top:24px; }
+  button { padding:6px 12px; background:#2e7d32; color:#fff; border:none; border-radius:6px; cursor:pointer; margin-right:6px; }
+  button.reject { background:#7d2e2e; }
+  .empty { color:#777; margin-top:16px; }
   input { padding:8px; background:#222; color:#eee; border:1px solid #444; border-radius:6px; margin-right:8px; }
+  img.thumb { width:60px; height:34px; object-fit:cover; border-radius:4px; background:#fff; }
 </style>
 </head>
 <body>
-  <h1>Запросы на выплату (вручную, без автоматизации)</h1>
   <div>
     <input id="key" placeholder="Admin key">
     <button onclick="setKey()">Войти</button>
   </div>
+
+  <h1>Платежи СБП, ждущие подтверждения</h1>
+  <table id="paymentsTable" style="display:none">
+    <thead>
+      <tr><th></th><th>Когда</th><th>Стример</th><th>Сумма</th><th>Подпись</th><th></th></tr>
+    </thead>
+    <tbody id="paymentRows"></tbody>
+  </table>
+  <p class="empty" id="paymentsEmpty" style="display:none">Нет платежей, ожидающих подтверждения.</p>
+
+  <h1>Запросы на выплату стримерам (вручную, без автоматизации)</h1>
   <table id="table" style="display:none">
     <thead>
       <tr><th>Когда запрошено</th><th>Стример</th><th>Телефон (СБП)</th><th>Сумма</th><th></th></tr>
@@ -34,6 +48,7 @@ function setKey() {
   key = document.getElementById('key').value.trim();
   localStorage.setItem('admin_key', key);
   load();
+  loadPayments();
 }
 
 async function load() {
@@ -45,7 +60,7 @@ async function load() {
   document.getElementById('empty').style.display = rows.length ? 'none' : 'block';
   document.getElementById('rows').innerHTML = rows.map(r => `
     <tr>
-      <td>${new Date(r.requested_at).toLocaleString('ru-RU')}</td>
+      <td>${new Date(Number(r.requested_at)).toLocaleString('ru-RU')}</td>
       <td>${r.streamer_name} (${r.slug})</td>
       <td>${r.payout_phone || '—'}</td>
       <td>${r.amount} ₽</td>
@@ -60,10 +75,46 @@ async function markPaid(id) {
   load();
 }
 
+async function loadPayments() {
+  if (!key) return;
+  const res = await fetch('/api/admin/payments/pending', { headers: { 'X-Admin-Key': key } });
+  if (!res.ok) return;
+  const rows = await res.json();
+  document.getElementById('paymentsTable').style.display = rows.length ? 'table' : 'none';
+  document.getElementById('paymentsEmpty').style.display = rows.length ? 'none' : 'block';
+  document.getElementById('paymentRows').innerHTML = rows.map(r => `
+    <tr>
+      <td><img class="thumb" src="${r.image_data}"></td>
+      <td>${new Date(Number(r.created_at)).toLocaleString('ru-RU')}</td>
+      <td>${r.streamer_name} (${r.slug})</td>
+      <td>${r.amount} ₽</td>
+      <td>${r.caption ? '«' + r.caption + '»' : '—'}</td>
+      <td>
+        <button onclick="confirmPayment('${r.id}')">Подтвердить оплату</button>
+        <button class="reject" onclick="rejectPayment('${r.id}')">Отклонить</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function confirmPayment(id) {
+  if (!confirm('Подтверждаешь, что перевод по СБП реально пришёл?')) return;
+  await fetch(`/api/admin/payments/${id}/confirm`, { method: 'POST', headers: { 'X-Admin-Key': key } });
+  loadPayments();
+}
+
+async function rejectPayment(id) {
+  if (!confirm('Отклонить — оплата не пришла?')) return;
+  await fetch(`/api/admin/payments/${id}/reject`, { method: 'POST', headers: { 'X-Admin-Key': key } });
+  loadPayments();
+}
+
 if (key) {
   document.getElementById('key').value = key;
   load();
+  loadPayments();
 }
+setInterval(loadPayments, 5000);
 </script>
 </body>
 </html>

@@ -43,6 +43,13 @@
   .modal-box input[type=text] { width:100%; box-sizing:border-box; margin-top:12px; text-align:center; text-transform:uppercase; }
   .modal-actions { display:flex; gap:8px; margin-top:16px; }
   .modal-actions button { flex:1; }
+
+  .sbp-amount { font-size:28px; font-weight:bold; color:#fff; margin:10px 0; }
+  .sbp-qr { width:220px; height:220px; object-fit:contain; background:#fff; border-radius:10px; margin:0 auto 12px; display:block; }
+  .sbp-details { background:#111; border:1px solid #333; border-radius:8px; padding:10px; font-size:14px; margin-bottom:8px; }
+  .sbp-status { font-size:13px; color:#999; margin-top:14px; }
+  .sbp-status.confirmed { color:#7ad08a; }
+  .sbp-status.failed { color:#f08a8a; }
 </style>
 </head>
 <body>
@@ -54,6 +61,22 @@
       <div class="modal-title" id="modalTitle">Готово</div>
       <div class="modal-text" id="modalText"></div>
       <button class="modal-ok" id="modalOk">ОК</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="sbpModal" style="display:none">
+    <div class="modal-box">
+      <div class="modal-icon">💳</div>
+      <div class="modal-title">Оплати по СБП</div>
+      <img class="sbp-qr" id="sbpQr" src="/sbp-qr.jpg" onerror="this.style.display='none'">
+      <div class="sbp-amount" id="sbpAmount">— ₽</div>
+      <div class="sbp-details">
+        Банк: <b id="sbpBank">—</b>
+        <div id="sbpPhoneRow" style="display:none">Телефон: <b id="sbpPhone"></b></div>
+      </div>
+      <div class="modal-text">Отсканируй QR в банковском приложении и переведи указанную сумму. После оплаты подожди — донат уйдёт стримеру на модерацию автоматически, как только мы подтвердим получение перевода.</div>
+      <div class="sbp-status" id="sbpStatus">⏳ Ожидаем подтверждения оплаты…</div>
+      <button class="modal-ok" id="sbpClose" style="display:none">Готово</button>
     </div>
   </div>
 
@@ -111,7 +134,7 @@
   <button type="button" class="promo-link" id="promoOpen">У меня промокод</button>
   <p class="price">Базовая отправка рисунка: 50 ₽ + 1 ₽ за каждую секунду показа на стриме.</p>
 
-  <footer>
+  <footer style="display:none">
     Услугу оказывает: Агафонов Антон Андреевич, самозанятый (НПД), ИНН 470518210355.<br>
     Оплата через ЮKassa. Демонстрация рисунка зависит от решения стримера и не гарантируется.<br>
     <a href="/oferta.html">Публичная оферта, тарифы и условия оказания услуг</a> ·
@@ -379,6 +402,46 @@ async function submitDrawing(extra) {
   }).then(r => r.json());
 }
 
+function openSbpModal(data) {
+  document.getElementById('sbpAmount').textContent = data.amount + ' ₽';
+  document.getElementById('sbpBank').textContent = data.sbpBank;
+  if (data.sbpPhone) {
+    document.getElementById('sbpPhone').textContent = data.sbpPhone;
+    document.getElementById('sbpPhoneRow').style.display = 'block';
+  } else {
+    document.getElementById('sbpPhoneRow').style.display = 'none';
+  }
+  const statusEl = document.getElementById('sbpStatus');
+  statusEl.textContent = '⏳ Ожидаем подтверждения оплаты…';
+  statusEl.className = 'sbp-status';
+  document.getElementById('sbpClose').style.display = 'none';
+  document.getElementById('sbpModal').style.display = 'flex';
+
+  const poll = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/drawings/${data.id}/status`);
+      const s = await res.json();
+      if (s.status === 'pending' || s.status === 'approved' || s.status === 'showing' || s.status === 'shown') {
+        clearInterval(poll);
+        statusEl.textContent = '✅ Оплата подтверждена! Рисунок отправлен стримеру на модерацию.';
+        statusEl.className = 'sbp-status confirmed';
+        document.getElementById('sbpClose').style.display = 'block';
+      } else if (s.status === 'payment_failed') {
+        clearInterval(poll);
+        statusEl.textContent = '❌ Оплата не подтверждена. Если ты уже перевёл деньги, напиши нам.';
+        statusEl.className = 'sbp-status failed';
+        document.getElementById('sbpClose').style.display = 'block';
+      }
+    } catch (e) { /* keep polling */ }
+  }, 3000);
+}
+document.getElementById('sbpClose').onclick = () => {
+  document.getElementById('sbpModal').style.display = 'none';
+  const submitBtn = document.getElementById('submit');
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Отправить донат';
+};
+
 document.getElementById('submit').onclick = async () => {
   const submitBtn = document.getElementById('submit');
   submitBtn.disabled = true;
@@ -394,6 +457,11 @@ document.getElementById('submit').onclick = async () => {
       alert(data.error);
       submitBtn.disabled = false;
       submitBtn.textContent = 'Отправить донат';
+      return;
+    }
+    if (data.manualPayment) {
+      submitBtn.textContent = 'Отправить донат';
+      openSbpModal(data);
       return;
     }
     window.location.href = data.paymentUrl;

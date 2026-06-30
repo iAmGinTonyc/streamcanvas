@@ -76,6 +76,12 @@ const YOOKASSA_SHOP_ID = process.env.YOOKASSA_SHOP_ID;
 const YOOKASSA_SECRET_KEY = process.env.YOOKASSA_SECRET_KEY;
 const PLATFORM_FEE_RATE = 0.10; // 10% комиссия платформы
 
+// На время тестов основной способ оплаты — прямой перевод по СБП с ручным подтверждением.
+// Переключить обратно на ЮKassa: PAYMENT_METHOD=yookassa в env.
+const PAYMENT_METHOD = process.env.PAYMENT_METHOD || 'sbp';
+const SBP_PHONE = process.env.SBP_PHONE || '';
+const SBP_BANK = process.env.SBP_BANK || '';
+
 const BASE_PRICE = 50; // отправка рисунка
 const RATE_PER_SEC = 1; // цена за каждую секунду показа
 const MIN_DURATION_SEC = 10;
@@ -260,7 +266,10 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
   const amount = calcAmount(duration_sec);
   if (amount === null) return res.status(400).json({ error: 'недопустимая длительность показа' });
 
-  if (!YOOKASSA_SHOP_ID || !YOOKASSA_SECRET_KEY) {
+  if (PAYMENT_METHOD === 'sbp' && !SBP_BANK) {
+    return res.status(503).json({ error: 'Оплата временно не подключена' });
+  }
+  if (PAYMENT_METHOD !== 'sbp' && (!YOOKASSA_SHOP_ID || !YOOKASSA_SECRET_KEY)) {
     return res.status(503).json({ error: 'Оплата временно не подключена' });
   }
 
@@ -272,6 +281,17 @@ app.post('/api/drawings', asyncHandler(async (req, res) => {
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'awaiting_payment', $8, $9, $10)`,
     [id, streamer.id, image_data, duration_sec, amount, platform_fee, streamer_amount, captionText, soundEffect, Date.now()]
   );
+
+  if (PAYMENT_METHOD === 'sbp') {
+    return res.json({
+      id,
+      status: 'awaiting_payment',
+      manualPayment: true,
+      amount,
+      sbpPhone: SBP_PHONE,
+      sbpBank: SBP_BANK,
+    });
+  }
 
   let payment;
   try {
@@ -527,6 +547,38 @@ app.post('/api/admin/payout-requests/:id/mark-paid', authAdmin, asyncHandler(asy
   const { rows } = await pool.query('SELECT * FROM payout_requests WHERE id = $1', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
   await pool.query("UPDATE payout_requests SET status = 'paid', paid_at = $1 WHERE id = $2", [Date.now(), rows[0].id]);
+  res.json({ ok: true });
+}));
+
+// --- admin: manual SBP payment confirmation (no payment gateway webhook in this mode) ---
+app.get('/api/admin/payments/pending', authAdmin, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT d.id, d.image_data, d.amount, d.duration_sec, d.caption, d.created_at, s.name AS streamer_name, s.slug
+     FROM drawings d
+     JOIN streamers s ON s.id = d.streamer_id
+     WHERE d.status = 'awaiting_payment'
+     ORDER BY d.created_at ASC`
+  );
+  res.json(rows);
+}));
+
+app.post('/api/admin/payments/:id/confirm', authAdmin, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT * FROM drawings WHERE id = $1 AND status = 'awaiting_payment'",
+    [req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  await pool.query("UPDATE drawings SET status = 'pending' WHERE id = $1", [rows[0].id]);
+  res.json({ ok: true });
+}));
+
+app.post('/api/admin/payments/:id/reject', authAdmin, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT * FROM drawings WHERE id = $1 AND status = 'awaiting_payment'",
+    [req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  await pool.query("UPDATE drawings SET status = 'payment_failed' WHERE id = $1", [rows[0].id]);
   res.json({ ok: true });
 }));
 
