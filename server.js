@@ -368,6 +368,27 @@ app.post('/api/drawings/:id/reject', authStreamer, asyncHandler(async (req, res)
   res.json({ ok: true });
 }));
 
+// --- streamer confirms a manual SBP payment for their own donation (testing-mode shortcut) ---
+app.post('/api/drawings/:id/confirm-payment', authStreamer, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT * FROM drawings WHERE id = $1 AND streamer_id = $2 AND status = 'awaiting_payment'",
+    [req.params.id, req.streamer.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  await pool.query("UPDATE drawings SET status = 'pending' WHERE id = $1", [rows[0].id]);
+  res.json({ ok: true });
+}));
+
+app.post('/api/drawings/:id/reject-payment', authStreamer, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT * FROM drawings WHERE id = $1 AND streamer_id = $2 AND status = 'awaiting_payment'",
+    [req.params.id, req.streamer.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  await pool.query("UPDATE drawings SET status = 'payment_failed' WHERE id = $1", [rows[0].id]);
+  res.json({ ok: true });
+}));
+
 // --- streamer manually stops a currently-showing drawing ---
 app.post('/api/drawings/:id/stop', authStreamer, asyncHandler(async (req, res) => {
   const { rows } = await pool.query(

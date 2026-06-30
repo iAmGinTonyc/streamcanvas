@@ -22,8 +22,8 @@
   .feed-caption { font-size:13px; color:#ddd; font-style:italic; margin-bottom:6px; }
   .feed-actions { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
   button { padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
-  .approve { background:#2e7d32; color:#fff; }
-  .reject { background:#7d2e2e; color:#fff; }
+  .approve, .confirm-payment { background:#2e7d32; color:#fff; }
+  .reject, .reject-payment { background:#7d2e2e; color:#fff; }
   .stop { background:#7d5a1f; color:#fff; }
   .replay { background:#1f3b5b; color:#fff; }
 
@@ -229,6 +229,12 @@ async function loadFeed() {
               <button class="reject">Отклонить</button>
             </div>
           ` : ''}
+          ${d.status === 'awaiting_payment' ? `
+            <div class="feed-actions">
+              <button class="confirm-payment">Подтвердить оплату</button>
+              <button class="reject-payment">Отклонить оплату</button>
+            </div>
+          ` : ''}
           ${d.status === 'showing' ? `
             <div class="feed-actions">
               <button class="stop">Снять с эфира</button>
@@ -248,11 +254,15 @@ async function loadFeed() {
     const id = item.dataset.id;
     const approveBtn = item.querySelector('.approve');
     const rejectBtn = item.querySelector('.reject');
+    const confirmPaymentBtn = item.querySelector('.confirm-payment');
+    const rejectPaymentBtn = item.querySelector('.reject-payment');
     const stopBtn = item.querySelector('.stop');
     const replayBtn = item.querySelector('.replay');
     const thumb = item.querySelector('.feed-thumb');
     if (approveBtn) approveBtn.onclick = () => act(id, 'approve');
     if (rejectBtn) rejectBtn.onclick = () => act(id, 'reject');
+    if (confirmPaymentBtn) confirmPaymentBtn.onclick = () => act(id, 'confirm-payment');
+    if (rejectPaymentBtn) rejectPaymentBtn.onclick = () => act(id, 'reject-payment');
     if (stopBtn) stopBtn.onclick = () => act(id, 'stop');
     if (replayBtn) replayBtn.onclick = () => act(id, 'replay');
     thumb.onclick = () => {
